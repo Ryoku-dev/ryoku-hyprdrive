@@ -1,32 +1,23 @@
 #pragma once
 
-// A MONITOR'S ROW OF DESKTOPS (user, 2026-11-11: "per monitor workspace blocks
-// - adopt but don't keep empty workspaces generated on config switch"; and on a
-// full block: "no limit").
+// A MONITOR'S ROW OF DESKTOPS: what its overview strip shows and the only
+// numbers Hyprdrive ever gives a desktop on it.
 //
-// Omarchy 4.5 gives every monitor a BLOCK of desktop numbers
-// (default/hypr/monitor-workspaces.lua: block 0 = 1-10, block 1 = 11-20, ...,
-// keyed by the monitor in ~/.local/state/omarchy/monitor-workspaces) and
-// renumbers into it on every config reload and monitor change. Hyprdrive used
-// one global row 1..N and renumbered back: the two fought. Now each monitor has
-// a Row, and Hyprdrive only ever numbers a desktop inside the row of the
-// monitor it is on (DesktopPlan::check, Verdict::OutsideRow). Omarchy's
-// reconcile never moves a desktop that already sits in its own monitor's block,
-// so every layout Hyprdrive makes is a fixed point of it: no fight.
+// Ryoku groups workspace ids in BLOCKS of ten (modules/workspaces.lua, PER):
+// block 0 is 1-10, block 1 is 11-20, and Super+N goes to slot N of the block
+// you are in. A monitor's row is the block of the desktop it shows, so the
+// strip lists that block's desktops, a new desktop takes a free id in it, and
+// a reorder or a fullscreen app's own desktop renumbers inside it and never
+// into another block.
 //
 // A row is SLOTS: slot 1..capacity are the block's own ids (base+1 ..
 // base+capacity); slot capacity+1, +2, ... are the row's OVERFLOW, ids
 // OVERFLOW_ORIGIN + block*OVERFLOW_SPAN + 1, +2, ... A full block still takes
-// an 11th desktop ("no limit"), and it can never take another monitor's first
-// id (block*10+11 is the next block's). Omarchy sees an overflow id as a guest
-// of a block no monitor owns (block_of_id = (id-1)//10 is ~100000+): merge()'s
-// append_slot finds no room while the block is full, so it stays put; once the
-// block has room Hyprdrive's own compaction pulls it in first, in order --
-// where append_slot would put it.
+// an 11th desktop, and it can never take the next block's first id. Once the
+// block has room again the overflow desktop moves back into it.
 //
-// With blocks off (no Omarchy, Omarchy before 4.5, omarchy.lua not loaded)
-// every monitor has the IMPLICIT row: base 0, unbounded, slot == id -- one
-// shared global number line, exactly the pre-blocks behaviour.
+// With blocks off (capacity 0) every monitor has the IMPLICIT row: base 0,
+// unbounded, slot == id, one global number line.
 //
 // No Hyprland types: tests/unit/row_test.cpp.
 
@@ -36,18 +27,29 @@ namespace Hyprdrive {
     struct Row {
         using Id = long long;
 
-        // Overflow ids: far above any block Omarchy hands out (lowest free
-        // block first, one per monitor ever seen), one span per block.
+        // Overflow ids: far above any block a desktop is numbered in, one span
+        // per block.
         static constexpr Id OVERFLOW_ORIGIN = 1'000'000;
         static constexpr Id OVERFLOW_SPAN   = 1'000;
 
         Id   base        = 0;
         Id   capacity    = 0; // the block's own slots; 0 = the implicit, unbounded row
         Id   overflow    = 0; // the id before the first overflow id (bounded rows)
-        bool provisional = false; // block guessed (the monitor is not in Omarchy's file yet)
+        bool provisional = false; // block guessed: nothing in it is renumbered
 
         static constexpr Row block(Id index, Id slots, bool provisional = false) {
             return {.base = index * slots, .capacity = slots, .overflow = OVERFLOW_ORIGIN + index * OVERFLOW_SPAN, .provisional = provisional};
+        }
+
+        // The block an id belongs to (an overflow id: its row's block).
+        static constexpr Id blockOf(Id id, Id slots) {
+            if (id > OVERFLOW_ORIGIN)
+                return (id - OVERFLOW_ORIGIN - 1) / OVERFLOW_SPAN;
+            return slots > 0 && id >= 1 ? (id - 1) / slots : 0;
+        }
+        // The place of an id inside its own block, as Super+N counts it.
+        static constexpr Id slotIn(Id id, Id slots) {
+            return slots > 0 && id >= 1 ? (id - 1) % slots + 1 : id;
         }
 
         constexpr bool bounded() const {

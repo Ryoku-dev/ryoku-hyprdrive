@@ -9,8 +9,6 @@
 
 #include "Compat.hpp"
 #include "Fonts.hpp"
-#include "Integration.hpp"
-#include "PaletteFile.hpp"
 
 #include <chrono>
 

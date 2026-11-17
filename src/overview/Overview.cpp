@@ -685,7 +685,7 @@ void COverview::render() {
 
 
     // X92 / X97. Blur the overview main FB (cards + tiles) into a PRIVATE FB.
-    // Gate on decoration:blur:enabled — the same switch window frost uses — NOT
+    // Gate on decoration:blur:enabled -- the same switch window frost uses -- NOT
     // plugin:scrolloverview:blur (that only means wallpaper backdrop blur and
     // defaults false). X96 made strip sample this FB; gating on the wallpaper
     // option wiped strip + search-result frost entirely.
@@ -809,22 +809,8 @@ void COverview::render() {
 
     blockOverviewLayerBlurOptimization(FIRSTLAYERELEMENT);
 
-    // OVERVIEW_CPP_SPEC §10 clause 6, the pinned-in-overview half X27 left open:
-    // the dock stays on screen with the overview over it. Its RENDER_POST_WINDOWS
-    // hook fires far below this, so the overview buried it -- and X26 cannot ask
-    // the user to drop a window on a target that is not drawn. Last, so it is
-    // above the cards, the strip and the search field, which is where a dock the
-    // user is dropping onto belongs. main.cpp skips the desktop hook while an
-    // overview owns the monitor, so the pill is still drawn exactly once.
-    // Y7. The pill glows as a dragged window nears it; the dock computes the
-    // distance itself, this only says whether a drag is happening at all.
-    Hyprdrive::Dock::setWindowDragActive(drag.activeWindow.operator bool());
     OpenProf::gpuMark("pinned+top");
-    Hyprdrive::Dock::render(MONITOR);
-    OpenProf::gpuMark("dock");
-    // Hover titles hang off the bottom of a tile, so they collide with the
-    // dock on the active card. Flush them after the pill so the label is the
-    // thing you read, not the thing the dock covers.
+    // Hover titles hang off the bottom of a tile: last, over everything else.
     TileChrome::renderCaptions(MONITOR);
 
     // OVERLAY layers go LAST, above the dock and the captions. That layer is

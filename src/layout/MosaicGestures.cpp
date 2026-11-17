@@ -1,6 +1,7 @@
 // Mosaic: the corner grab, the Super gesture and its zoom, the canvas clock, the edge push
 // and the hover veto -- the gestures that span desktops. Split out of Mosaic.cpp; the state
 // is still there (MosaicParts.hpp).
+#include "BarLayer.hpp"
 #include "MosaicParts.hpp"
 #include "MotionTimings.hpp"
 #include "MotionClock.hpp"
@@ -160,14 +161,23 @@ namespace Hyprdrive::Mosaic {
     // no zoom until Super is let go -- the window being aimed at stays
     // put, and so does the canvas after the drop (user, 2026-10-26: Super+drag
     // "is buggy"; the pan used to fire on the way to the window and again
-    // after the drop). Moving SUPER_SLOP px with no button ENGAGES it: the
+    // after the drop). Moving mosaic:super_zoom_distance px with no button, while
+    // mosaic:super_zoom is on, ENGAGES it: the
     // whole canvas shrinks onto the screen, hovering a window focuses it, and
     // letting go of Super zooms back in on it. (A second mode, where the
     // pointer's place on the screen was the view's place on the canvas, was
     // retired: user, 2026-10-29. mosaic:canvas_super_move is still accepted
     // so older configs load, and ignored.)
     namespace {
-        constexpr double  SUPER_SLOP = 32.0;
+        // How far the pointer moves with Super held before anything happens
+        // (mosaic:super_zoom_distance), and whether that zooms out at all
+        // (mosaic:super_zoom).
+        double superSlop() {
+            return sc<double>(std::max<Hyprlang::INT>(1, Hyprdrive::Config::getValue<Hyprlang::INT>("plugin:hyprdrive:mosaic:super_zoom_distance")));
+        }
+        bool superZoomOn() {
+            return Hyprdrive::Config::getValue<Hyprlang::INT>("plugin:hyprdrive:mosaic:super_zoom") != 0;
+        }
 
         // THE TITLES FADE (user, 2026-11-01: "those labels should adopt the
         // same fade in/out animations as the rest of the labels in
@@ -619,7 +629,7 @@ namespace Hyprdrive::Mosaic {
     bool vetoHoverFocus(const PHLWINDOW& w) {
         if (!w || zoomOwnsPointer())
             return false;
-        if (pointerOnChrome(g_pInputManager->getMouseCoordsInternal()) || pointerInDockBand(g_pInputManager->getMouseCoordsInternal())) {
+        if (pointerOnChrome(g_pInputManager->getMouseCoordsInternal())) {
             g_hoverStale = true;
             return true;
         }
@@ -838,7 +848,7 @@ namespace Hyprdrive::Mosaic {
         // screen so the last pill goes with it.
         if (!g_superLabels) {
             const Vector2D D = P - g_superAnchor;
-            if (g_super == ESuper::ZOOMED || D.x * D.x + D.y * D.y >= SUPER_SLOP * SUPER_SLOP) {
+            if (g_super == ESuper::ZOOMED || D.x * D.x + D.y * D.y >= superSlop() * superSlop()) {
                 g_superLabels = true;
                 g_pHyprRenderer->damageMonitor(MON);
             }
@@ -861,7 +871,7 @@ namespace Hyprdrive::Mosaic {
 
         if (g_super == ESuper::ARMED) {
             const Vector2D D = P - g_superAnchor;
-            if (D.x * D.x + D.y * D.y < SUPER_SLOP * SUPER_SLOP)
+            if (D.x * D.x + D.y * D.y < superSlop() * superSlop() || !superZoomOn())
                 return;
             if (!A->zoomOut())
                 return;
@@ -1020,7 +1030,7 @@ namespace Hyprdrive::Mosaic {
         if (!VIEW || VIEW->type() != Desktop::View::VIEW_TYPE_LAYER_SURFACE)
             return;
         const auto LS = Desktop::View::CLayerSurface::fromView(VIEW);
-        if (!LS || (LS->m_namespace != "omarchy-bar" && LS->m_namespace != "waybar"))
+        if (!LS || !Hyprdrive::isBarLayer(LS->m_namespace))
             return;
         const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
         const auto     MON = LS->m_monitor.lock();
@@ -1062,7 +1072,7 @@ namespace Hyprdrive::Mosaic {
         if (g_pInputManager->hasHeldButtons())
             return false;
         const Vector2D P = g_pInputManager->getMouseCoordsInternal();
-        if (pointerOnChrome(P) || pointerInDockBand(P) || pointerAtOuterEdge(P))
+        if (pointerOnChrome(P) || pointerAtOuterEdge(P))
             return false;
         const auto W = Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
         if (!W || !W->mapped() || W->isHidden() || W == Desktop::focusState()->window())

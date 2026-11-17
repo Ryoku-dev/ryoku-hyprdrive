@@ -1,5 +1,4 @@
 #include "HoverTarget.hpp"
-#include "Dock.hpp"
 #include "IOverview.hpp"
 
 #include <hyprland/src/desktop/view/window/Window.hpp>
@@ -20,13 +19,6 @@ namespace Hyprdrive::HoverTarget {
     }
 
     PHLWINDOW window() {
-        const auto TILE = overviewTile();
-        const auto CELL = TILE ? PHLWINDOW{} : Dock::previewUnderPointer();
-        switch (source(!!TILE, !!CELL)) {
-            case ESource::OVERVIEW_TILE: return TILE;
-            case ESource::DOCK_PREVIEW: return CELL;
-            case ESource::NONE: break;
-        }
-        return {};
+        return overviewTile();
     }
 }

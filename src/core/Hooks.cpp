@@ -54,16 +54,6 @@ void disableScrollOverviewHooks() {
 }
 
 namespace PluginDetail {
-void setDockCursor(bool on) {
-    if (on == g_dockCursor || !Pointer::Cursor::overrideController)
-        return;
-    g_dockCursor = on;
-    if (on)
-        Pointer::Cursor::overrideController->setOverride("left_ptr", Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
-    else
-        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
-}
-
 // Hooked on Layout::CWindowTarget::sendWindowSize (main.cpp): on 0.57 the
 // target's updatePos configures through it directly, past CWindow's.
 void hkSendWindowSize(void* thisptr, bool force) {
@@ -84,10 +74,8 @@ bool           hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR 
 }
 
 void hkTargetPlace(void* thisptr, const Layout::STargetBox& box, uint8_t flags) {
-    Hyprdrive::DockRoom::place(thisptr, box, flags, [](void* t, const Layout::STargetBox& b, uint8_t f) {
-        Hyprdrive::OwnSizeTile::place(t, b, f, [](void* t2, const Layout::STargetBox& b2, uint8_t f2) {
-            rc<void (*)(void*, const Layout::STargetBox&, uint8_t)>(g_pTargetPlaceHook->m_original)(t2, b2, f2);
-        });
+    Hyprdrive::OwnSizeTile::place(thisptr, box, flags, [](void* t, const Layout::STargetBox& b, uint8_t f) {
+        rc<void (*)(void*, const Layout::STargetBox&, uint8_t)>(g_pTargetPlaceHook->m_original)(t, b, f);
     });
 }
 
@@ -100,7 +88,6 @@ void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
     const Vector2D BEFORE = g_pInputManager->getMouseCoordsInternal();
     rc<origOnMouseMoved>(g_pScrollMouseMovedHook->m_original)(thisptr, e);
     Hyprdrive::Mosaic::onPointerDelta(e.delta, g_pInputManager->getMouseCoordsInternal() - BEFORE);
-    Hyprdrive::Dock::feedPointerMotion(e.delta);
     Hyprdrive::XGeometry::check();
     Hyprdrive::FullscreenGuard::resumePointerLock();
 }

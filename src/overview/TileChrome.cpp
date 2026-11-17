@@ -6,10 +6,10 @@
 #include "Motion.hpp"
 
 #include "Config.hpp"
+#include "Look.hpp"
 #include "globals.hpp"
 
 #include "AppSearch.hpp"
-#include "Dock.hpp"
 #include "OverviewRender.hpp"
 #include "WindowPill.hpp"
 
@@ -103,20 +103,18 @@ constexpr float CLOSE_SLOP  = 8.F;
 constexpr float CAPTION_GAP = 6.F;
 constexpr float CAPTION_H   = 40.F;
 
-// THE X IS DRAWN HERE, not taken from the icon theme (user, 2026-10-17: the
-// grid's close button was a blank light disc). window-close-symbolic is light
-// artwork in a light-on-dark theme, and this pass cannot recolour a texture, so
-// on the light disc the X vanished. Two round-capped strokes in the host's
-// button grey, rasterised once per pixel size.
+// THE X IS DRAWN HERE, not taken from the icon theme: this pass cannot
+// recolour a texture, and the button wears the desktop's ink, so two
+// round-capped strokes are rasterised in that ink, once per size and colour.
 constexpr float CLOSE_X_REACH  = 0.30F; // each stroke spans 0.30 .. 0.70 of the glyph box
 constexpr float CLOSE_X_STROKE = 0.11F; // of the glyph box
-constexpr float CLOSE_X_RGB[3] = {63.F / 255.F, 63.F / 255.F, 70.F / 255.F};
 
-static SP<Render::ITexture> closeGlyph(int px) {
-    static std::unordered_map<int, SP<Render::ITexture>> s_cache;
+static SP<Render::ITexture> closeGlyph(int px, const CHyprColor& ink) {
+    static std::unordered_map<uint64_t, SP<Render::ITexture>> s_cache;
     if (px < 4)
         return nullptr;
-    if (const auto IT = s_cache.find(px); IT != s_cache.end())
+    const uint64_t KEY = (uint64_t{ink.getAsHex()} << 16) | sc<uint64_t>(px & 0xFFFF);
+    if (const auto IT = s_cache.find(KEY); IT != s_cache.end())
         return IT->second;
     if (s_cache.size() > 16)
         s_cache.clear();
@@ -126,7 +124,7 @@ static SP<Render::ITexture> closeGlyph(int px) {
     cairo_set_antialias(CR, CAIRO_ANTIALIAS_BEST);
     cairo_set_line_cap(CR, CAIRO_LINE_CAP_ROUND);
     cairo_set_line_width(CR, std::max(1.5, px * double{CLOSE_X_STROKE}));
-    cairo_set_source_rgba(CR, CLOSE_X_RGB[0], CLOSE_X_RGB[1], CLOSE_X_RGB[2], 1.0);
+    cairo_set_source_rgba(CR, ink.r, ink.g, ink.b, 1.0);
     const double LO = px * double{CLOSE_X_REACH}, HI = px * (1.0 - double{CLOSE_X_REACH});
     cairo_move_to(CR, LO, LO);
     cairo_line_to(CR, HI, HI);
@@ -139,7 +137,7 @@ static SP<Render::ITexture> closeGlyph(int px) {
                                                                   sc<uint32_t>(cairo_image_surface_get_stride(SURF)), Vector2D{sc<double>(px), sc<double>(px)});
     cairo_destroy(CR);
     cairo_surface_destroy(SURF);
-    s_cache[px] = tex;
+    s_cache[KEY] = tex;
     return tex;
 }
 
@@ -275,12 +273,7 @@ void drawCaption(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBo
     // sliding up the screen if a hover lands mid-open.
     const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * scale, ICON_MAX * scale);
     const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * scale;
-    float       plateBottom = BOTTOM + CAPTION_H * scale;
-    // Keep the title readable without covering dock icons. The plate is still
-    // drawn after the dock (z-order); this only moves it up off the pill.
-    const auto DOCK = Dock::layout(monitor).pill;
-    if (!DOCK.empty() && plateBottom > sc<float>(DOCK.y))
-        plateBottom = sc<float>(DOCK.y) - CAPTION_GAP * scale;
+    const float plateBottom = BOTTOM + CAPTION_H * scale;
     OverviewRender::labelPill(monitor, window->metadata().title(), sc<float>(tileBox.x + tileBox.w / 2.0), plateBottom, A, scale);
 }
 
@@ -571,24 +564,15 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     if (ALPHA <= 0.F)
         return;
 
-    const int ROUND = sc<int>(std::round(BUTTON.w / 2.0));
-
-    // X56. The RING is Hyprland's -- size from general:border_size, colour from
-    // general:col.active_border -- the same source the tooltip and the drop
-    // indicator read, so the button re-themes with everything else.
-    const int BORDER = std::max(0, Hyprdrive::Config::getValue<int>("general:border_size"));
-
-    // The DISC stays light, and that is a legibility constraint rather than a
-    // taste one: the symbolic glyph ships as near-black artwork and this render
-    // path cannot recolour a texture, so the host's dark disc would hide the X
-    // completely. The host gets away with rgba(63,63,70,.98) because CSS
-    // recolours its StIcon to #fafafb. Revisit if the glyph ever gets a tint.
-    // Ring and disc fade as one surface (OverviewRender::ringedPlate): the
-    // ring under the disc tinted it with the accent all through the fade.
-    OverviewRender::ringedPlate(BUTTON, ROUND, 2.F, Hyprdrive::Config::highlightColor(), sc<double>(BORDER) * SCALE, CHyprColor{0.93F, 0.93F, 0.93F, 0.95F}, ALPHA);
+    // A tonal plaque, like the window pill's buttons: the field plane, cut at
+    // the token cut in Lithic with the vein hairline, a disc in the round styles.
+    const double MS     = std::max(monitorScale, 0.01F);
+    const int    ROUND  = sc<int>(std::round(std::min<double>(Hyprdrive::Config::chromeCorner(Hyprdrive::Look::current().cuts.token, BUTTON.w / MS, BUTTON.h / MS) * MS, BUTTON.w / 2.0)));
+    const auto   STROKE = Hyprdrive::Config::chromeStroke();
+    OverviewRender::ringedPlate(BUTTON, ROUND, Hyprdrive::Config::chromeCornerPower(), STROKE, STROKE.a > 0.F ? MS : 0.0, Hyprdrive::Look::current().roles.field, ALPHA);
 
     const float SIDE = std::round(sc<float>(BUTTON.w) * CLOSE_GLYPH);
-    if (const auto GLYPH = closeGlyph(sc<int>(SIDE))) {
+    if (const auto GLYPH = closeGlyph(sc<int>(SIDE), Hyprdrive::Config::themeForeground())) {
 
         CTexPassElement::SRenderData x;
         x.tex = GLYPH;

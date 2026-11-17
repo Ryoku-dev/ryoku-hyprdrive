@@ -11,10 +11,8 @@
 #include "globals.hpp"
 #include "IOverview.hpp"
 #include "DebugPaths.hpp"
-#include "Dock.hpp"
-#include "DockStacks.hpp"
+#include "BarLayer.hpp"
 #include "OverviewRender.hpp"
-#include "FlightController.hpp"
 
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -171,23 +169,16 @@ namespace Hyprdrive::Mosaic {
         const double PX = sc<double>(Hyprdrive::Config::getValue<Hyprlang::INT>("plugin:hyprdrive:mosaic:edge_push_resistance"));
         return std::max(0.0, PX) * (axis == 1 && sign > 0 ? 1.5 : 1.0);
     }
-    // ON THE DOCK (user, 2026-11-09: "being mouseovered on dock, dock context
-    // menus and folders should prevent focusing a window as usual"): the
-    // pointer on the dock's pill, a menu, a fan or pane, or on any layer
-    // surface but the bar (focusUnderBar has that one) is not on the window
-    // painted underneath -- and while a menu or a fan is up nothing moves.
-    bool pointerOnChrome(const Vector2D& p) {
-        if (Hyprdrive::Stacks::isOpen() || Hyprdrive::Dock::menuOpen())
-            return true;
-        // The dock answers in monitor-local render px.
-        if (const auto MON = State::monitorState()->query().vec(p).run(); MON && Hyprdrive::Dock::uiContains(MON, (p - MON->m_position) * MON->m_scale))
-            return true;
+    // ON THE SHELL: the pointer on any layer surface but the bar (focusUnderBar
+    // has that one) -- the dock, a menu, a popout -- is not on the window
+    // painted underneath.
+    bool pointerOnChrome(const Vector2D&) {
         const auto PSURF = g_pSeatManager ? g_pSeatManager->m_state.pointerFocus.lock() : SP<CWLSurfaceResource>{};
         const auto HLS   = PSURF ? Desktop::View::CWLSurface::fromResource(PSURF) : SP<Desktop::View::CWLSurface>{};
         const auto VIEW  = HLS ? HLS->view() : SP<Desktop::View::IView>{};
         if (VIEW && VIEW->type() == Desktop::View::VIEW_TYPE_LAYER_SURFACE) {
             const auto LS = Desktop::View::CLayerSurface::fromView(VIEW);
-            return !LS || (LS->m_namespace != "omarchy-bar" && LS->m_namespace != "waybar");
+            return !LS || !Hyprdrive::isBarLayer(LS->m_namespace);
         }
         return false;
     }
@@ -203,22 +194,6 @@ namespace Hyprdrive::Mosaic {
     // a key, a click or the dock put the focus where the user wants it, and
     // the next motion inside the window under the pointer took it back.
     bool g_hoverStale = false;
-    // THE DOCK'S BAND (user, 2026-11-09: pushing down "while dock is up still
-    // eventually focuses windows. it should be able to push but not focus
-    // windows UNTIL I have moved my cursor outside the boundaries that
-    // triggered the dock"): an autohiding dock that is up owns the screen's
-    // width from its top edge down, not just its pill -- the pointer there
-    // came to show the dock, and nothing under it takes the focus.
-    bool pointerInDockBand(const Vector2D& p) {
-        const auto MON = State::monitorState()->query().vec(p).run();
-        if (!MON || !Hyprdrive::Config::getValue<bool>("plugin:hyprdrive:dock:autohide"))
-            return false;
-        const auto L = Hyprdrive::Dock::layout(MON);
-        if (L.pill.width < 1 || L.pill.height < 1)
-            return false; // away: no dock up
-        const double SC = std::max(MON->m_scale, 0.01F);
-        return p.y >= MON->m_position.y + L.pill.y / SC;
-    }
     // A window sliding under the pointer while it pushes is not a hover.
     bool edgePanRecent() {
         return g_edgePan.who && std::chrono::steady_clock::now() - g_edgePan.at < EDGE_PAN_HOLD;

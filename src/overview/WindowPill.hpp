@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DockInput.hpp" // SClaim -- the pill answers on the dock's ladder, not a third one
+#include "InputClaim.hpp"
 
 // V11_SPEC V2 (user, 2026-08-17). Hold SUPER and every window grows a pill:
 // three buttons -- minimize, maximize, close -- on a frosted capsule STRADDLING
@@ -14,7 +14,7 @@
 // and the AUDIENCE (every visible window of the active desktop out there, the
 // hovered tile alone in here, where it stands in for X55's close-X).
 //
-// IT OWNS NO INPUT PATH. Both hooks ask it through DockInput::SClaim, and the
+// IT OWNS NO INPUT PATH. Both hooks ask it through Input::SClaim, and the
 // answer is deliberately narrow: a BUTTON claims, the capsule around the buttons
 // does not. That is the whole of what keeps Hyprland's own
 // `SUPER + mouse:272 -> window.drag` bindm working with the pill on screen. The
@@ -69,7 +69,7 @@ void    activate(PHLMONITOR monitor, const PHLWINDOW& window, EButton button);
 // The desktop's primary button, in one call: the pill's own buttons, and the
 // double-click that toggles a window between floating and tiled. Everything
 // else is passed through untouched -- see the note at the top about the bindm.
-DockInput::SClaim handleDesktop(PHLMONITOR monitor, const Vector2D& local, uint32_t button, bool pressed);
+Input::SClaim handleDesktop(PHLMONITOR monitor, const Vector2D& local, uint32_t button, bool pressed);
 
 // Draw a pill on every visible window of `monitor`'s active desktop. Called from
 // the RENDER_POST_WINDOWS stage beside the dock, so the pills sit above every

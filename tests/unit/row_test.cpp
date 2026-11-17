@@ -1,9 +1,8 @@
-// Host test for Row.hpp and RowsFile.hpp: a monitor's row of desktops -- the
-// implicit row (slot == id, unbounded), an Omarchy block (base+1..base+10) and
-// its overflow (an 11th desktop that can never be another block's), and the
-// parse of Omarchy's monitor-workspaces / -merged files.
+// Host test for Row.hpp: a monitor's row of desktops -- the implicit row
+// (slot == id, unbounded), a Ryoku block (base+1..base+10) and its overflow
+// (an 11th desktop that can never be another block's), and which block and
+// slot an id has.
 #include "Row.hpp"
-#include "RowsFile.hpp"
 
 #include <cstdio>
 
@@ -58,7 +57,7 @@ int main() {
                     overlaps += B.contains(A.idOf(s));
             }
         CHECK(overlaps == 0);
-        // an overflow id is in no block Omarchy can own: block_of_id is huge
+        // an overflow id is in no block of ten Super+N reaches: (id-1)/10 is huge
         CHECK((Row::block(0, 10).idOf(11) - 1) / 10 >= 100'000);
         CHECK((Row::block(99, 10).idOf(Row::block(99, 10).lastSlot()) - 1) / 10 < 1'000'000'000);
     }
@@ -70,31 +69,14 @@ int main() {
         CHECK(!sameRow(Row::block(1, 10), Row::block(2, 10)));
         CHECK(Row::block(1, 10, true).provisional);
     }
-    // ---- monitor-workspaces: connector -> block, the bar's rule
+    // ---- Ryoku's blocks: an id's block and its slot, as Super+N counts it
     {
-        const auto M = RowsFile::blocks("0\teDP-1\tSharp Corporation 0x14F9\n1\t\tLG Electronics LG ULTRAGEAR+\n2\tDP-1\tSamsung LC34G55T #1\n");
-        CHECK(M && M->size() == 2);
-        CHECK(M && M->at("eDP-1") == 0 && M->at("DP-1") == 2);
-        CHECK(M && !M->contains(""));
-        CHECK(RowsFile::blocks("") && RowsFile::blocks("")->empty());
-        CHECK(RowsFile::blocks("\n\n0\tHEADLESS-1\tHEADLESS-1\r\n") && RowsFile::blocks("0\tHEADLESS-1\tx\r\n")->at("HEADLESS-1") == 0);
-        CHECK(!RowsFile::blocks("x\tDP-1\tfoo\n"));     // not ours: refused whole
-        CHECK(!RowsFile::blocks("2\n"));                 // no connector field
-        CHECK(!RowsFile::blocks("0\tA\ta\n-1\tB\tb\n")); // one bad line refuses the file
-        CHECK(!RowsFile::blocks("100\tA\ta\n"));         // no such block
-    }
-    // ---- monitor-workspaces-merged: the guests' ids
-    {
-        const auto G = RowsFile::merged("21\t1\tSharp Corporation 0x14F9\n22\t2\tSharp Corporation 0x14F9\n");
-        CHECK(G && G->size() == 2 && G->contains(21) && G->contains(22));
-        CHECK(RowsFile::merged("") && RowsFile::merged("")->empty());
-        CHECK(!RowsFile::merged("abc\t1\tx\n"));
-        CHECK(!RowsFile::merged("0\t1\tx\n"));
-    }
-    // ---- Omarchy's slotOf (a visitor's label)
-    {
-        CHECK(RowsFile::slotOf(1, 10) == 1 && RowsFile::slotOf(10, 10) == 10 && RowsFile::slotOf(11, 10) == 1 && RowsFile::slotOf(24, 10) == 4);
-        CHECK(RowsFile::slotOf(7, 0) == 7);
+        CHECK(Row::blockOf(1, 10) == 0 && Row::blockOf(10, 10) == 0 && Row::blockOf(11, 10) == 1 && Row::blockOf(24, 10) == 2);
+        CHECK(Row::blockOf(Row::block(3, 10).idOf(11), 10) == 3); // an overflow id: its row's block
+        CHECK(Row::blockOf(7, 0) == 0);
+        CHECK(Row::slotIn(1, 10) == 1 && Row::slotIn(10, 10) == 10 && Row::slotIn(11, 10) == 1 && Row::slotIn(24, 10) == 4);
+        CHECK(Row::slotIn(7, 0) == 7);
+        CHECK(Row::block(Row::blockOf(13, 10), 10).slot(13) == Row::slotIn(13, 10));
     }
     std::printf("row_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

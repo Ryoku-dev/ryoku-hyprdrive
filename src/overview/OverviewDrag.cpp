@@ -311,7 +311,7 @@ void COverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOrigin) {
     for (size_t i = 0; i < images.size(); ++i) {
         if (images[i]->pWorkspace == WINDOW->m_workspace) {
             // D6: a strip grab must NOT drag the main view onto the mini's
-            // workspace — the whole point is to pull the window out of there.
+            // workspace -- the whole point is to pull the window out of there.
             if (!stripMiniOrigin)
                 viewportCurrentWorkspace = i;
             workspaceIdx = i;
@@ -414,15 +414,9 @@ void COverview::updateWindowDrag() {
 
     // D'1/D'2: mini scale means "over a strip cell or a foreign card", i.e.
     // anywhere that is not the main area. Keyed off the VIEWPORT workspace, not
-    // the drag's origin — for a D6 strip grab the origin is foreign by
+    // the drag's origin -- for a D6 strip grab the origin is foreign by
     // definition, and keying off it would keep the proxy shrunk all the way
     // into the main area. Identical for a main-grid grab, where the two agree.
-    // X26: the dock takes the same shrink the strip gets, which is the spec's
-    // "not a new animation" -- the proxy is already thumbnail-sized by the time
-    // the button comes up, so the minimize continues a motion instead of
-    // starting one.
-    const bool OVERDOCK = Hyprdrive::Dock::pillContains(pMonitor.lock(), lastMousePosLocal);
-
     // A strip cell is "not the main area" even when it is the cell OF the
     // workspace currently in the viewport -- and there DROPWORKSPACE ==
     // VIEWPORTWORKSPACE, so the foreign-card test alone answers false. That is
@@ -437,7 +431,7 @@ void COverview::updateWindowDrag() {
     const bool OVERSTRIP = workspaceAtStripPoint(lastMousePosLocal) != nullptr || scratchpadCellContains(lastMousePosLocal) || altCellAt(lastMousePosLocal).has_value();
 
     const auto VIEWPORTWORKSPACE = viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
-    if (const bool OVERFOREIGN = OVERDOCK || OVERSTRIP || (DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE); OVERFOREIGN != drag.miniOver) {
+    if (const bool OVERFOREIGN = OVERSTRIP || (DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE); OVERFOREIGN != drag.miniOver) {
         drag.miniFrom      = dragMiniProgress(); // from where it actually is, not from the end
         drag.miniOver      = OVERFOREIGN;
         drag.miniChangedAt = Time::steadyNow();
@@ -449,7 +443,7 @@ void COverview::updateWindowDrag() {
 
     // X3 delta 6. Any drop target, own workspace included -- the reference's
     // "tiles" DropArea spans the whole main area (WindowTiles.qml:444-452).
-    if (const bool OVERTARGET = OVERDOCK || DROPWORKSPACE != nullptr; OVERTARGET != drag.recentreOver) {
+    if (const bool OVERTARGET = DROPWORKSPACE != nullptr; OVERTARGET != drag.recentreOver) {
         drag.recentreFrom      = dragRecentreProgress(); // from where it actually is
         drag.recentreOver      = OVERTARGET;
         drag.recentreChangedAt = Time::steadyNow();
@@ -595,7 +589,7 @@ namespace {
 PHLWINDOW COverview::swapCandidateAt(const Vector2D& point, CBox* targetBox) {
     const auto MONITOR = pMonitor.lock();
     const auto DRAGGED = getOverviewWindowToShow(drag.activeWindow.lock());
-    if (!MONITOR || !DRAGGED || Hyprdrive::Dock::pillContains(MONITOR, point) || scratchpadCellContains(point))
+    if (!MONITOR || !DRAGGED || scratchpadCellContains(point))
         return nullptr;
 
     PHLWINDOW hit;
@@ -699,7 +693,7 @@ namespace {
             return;
         CRectPassElement::SRectData r;
         r.box           = box;
-        r.color         = Hyprdrive::Config::dockBackgroundColor().modifyA(SWAP_DIM_A * a);
+        r.color         = Hyprdrive::Config::chromeScrim().modifyA(SWAP_DIM_A * a);
         r.round         = round;
         r.roundingPower = Hyprdrive::Config::themeRoundingPower();
         g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(r));
@@ -832,8 +826,8 @@ bool COverview::commitSwap(const PHLWINDOW& a, const PHLWINDOW& b) {
     WSA->updateWindows();
     if (WSB != WSA)
         WSB->updateWindows();
-    Hyprdrive::Dock::noteRetiled(a);
-    Hyprdrive::Dock::noteRetiled(b);
+    Hyprdrive::Retiled::note(a);
+    Hyprdrive::Retiled::note(b);
     RESTORE();
 
     clearDragPending();
@@ -1109,12 +1103,6 @@ void COverview::gatherDropSite(SOverviewDropSite& site) {
 
     site.facts.haveWindow = static_cast<bool>(site.window);
     site.facts.haveTarget = static_cast<bool>(site.target);
-    // OVERVIEW_CPP_SPEC X26. Released on the dock: minimize, and nothing else
-    // runs -- the window must not also be moved to whatever card the pill floats
-    // over. Everything else about a missed drop is unchanged, because
-    // workspaceAtOverviewDropPoint already answers nullptr over the pill.
-    // Asked only with a window in hand, as the guard it replaced was.
-    site.facts.overPill = site.window && Hyprdrive::Dock::pillContains(site.dropMonitor, site.dropPointLocal);
 }
 
 // Stage 2. Which workspace the cursor is over and what kind of layout it runs.
@@ -1181,28 +1169,9 @@ void COverview::gatherDropAnchor(SOverviewDropSite& site) {
     }
 }
 
-void COverview::commitDropMinimize(const SOverviewDropSite& site) {
-    // Y5/Y8. Was a bare Minimize::minimize, which is exactly what X54's
-    // "everything that minimizes must come through these" forbids -- so a
-    // window dropped on the dock TELEPORTED while a clicked one flew. Now it
-    // flies like every other minimize, and `true` asks the icon it lands in
-    // to bounce once.
-    // From where it was let go: the dragged proxy, not the grid slot it left
-    // (user, 2026-09-30: the flight started back at the tile, and with motion
-    // blur that read as the whole window smearing down into the icon).
-    std::optional<CBox> startBox;
-    if (site.window && (!site.dropOverview || site.dropOverview == this))
-        startBox = draggedWindowBox(dragWorkspaceIndex(site.window));
-    Hyprdrive::Dock::minimizeWithFlight(site.dropMonitor, site.window, true, startBox);
-    clearDragPending();
-    damage();
-    if (site.dropOverview && site.dropOverview != this)
-        site.dropOverview->damage();
-}
-
 void COverview::commitDropCancel(const SOverviewDropSite& site) {
     // OVERVIEW_CPP_SPEC D5. Nothing is moved, so the window keeps its
-    // workspace, position and size — the drop is correctly a no-op. Without
+    // workspace, position and size -- the drop is correctly a no-op. Without
     // the seed below the tile still teleports home in one frame (measured:
     // 326 px in 1 frame at 60fps), which reads as a glitch rather than a
     // rejected drop. U4's reflow already eases a tile from wherever it is to
@@ -1282,7 +1251,7 @@ void COverview::commitDrop(const SOverviewDropSite& site, const Hyprdrive::Drop:
 
             // The retile above gives it a new SIZE; this is what lets it draw at
             // that size while its desktop is off screen.
-            Hyprdrive::Dock::noteRetiled(WINDOW);
+            Hyprdrive::Retiled::note(WINDOW);
 
             RESTOREACTIVEWORKSPACE();
             RESTOREVIEWPORTWORKSPACE();
@@ -1381,7 +1350,6 @@ void COverview::endWindowDrag() {
             site.dropOverview   = HIT->overview;
             site.dropMonitor    = HIT->monitor;
             site.dropPointLocal = THERE.middle();
-            site.facts.overPill = false;
         }
     }
 
@@ -1396,11 +1364,6 @@ void COverview::endWindowDrag() {
             damage();
             return;
         }
-    }
-
-    if (Hyprdrive::Drop::resolve(site.facts).action == Hyprdrive::Drop::EAction::Minimize) {
-        commitDropMinimize(site);
-        return;
     }
 
     gatherDropWorkspace(site);

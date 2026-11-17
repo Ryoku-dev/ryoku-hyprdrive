@@ -17,10 +17,7 @@
 #include "globals.hpp"
 #include "IOverview.hpp"
 #include "DebugPaths.hpp"
-#include "Dock.hpp"
-#include "DockStacks.hpp"
 #include "OverviewRender.hpp"
-#include "FlightController.hpp"
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
@@ -179,7 +176,6 @@ namespace Hyprdrive::Mosaic {
         extern bool g_hoverStale;
     bool hoverRefresh(bool blocked);
     bool pointerAtOuterEdge(const Vector2D& p);
-        extern bool pointerInDockBand(const Vector2D& p);
         extern bool edgePanRecent();
     // The canvas's frame clock (pans, zooms, a drag pushing at the screen's
     // edge): an event-loop timer, never a request from inside the render pass.
@@ -217,17 +213,13 @@ namespace Hyprdrive::Mosaic {
                 // re-aims it (panTo retargets): quick hops used to leave the
                 // last window focused but off screen.
                 const bool FFM   = reason == Desktop::FOCUS_REASON_FFM;
-                // Never while the dock has a fan, a pane or a menu up (user,
-                // 2026-11-03): a hover that got past it must not slide the
-                // canvas -- and the pointer with it -- out from under the dock.
-                const bool DOCKUP = Hyprdrive::Stacks::isOpen() || Hyprdrive::Dock::menuOpen();
                 // A window sliding under the pointer while it still pushes is
                 // no hover -- but once the pointer is off the edge, the push
                 // is over (user, 2026-11-09: quickly back on the previous
                 // window, it was focused and left half off screen).
                 const Vector2D PTR    = g_pInputManager->getMouseCoordsInternal();
                 const bool     PUSHING = edgePanRecent() && pointerAtOuterEdge(PTR);
-                const bool HOVER  = FFM && !g_cursorRiding && !DOCKUP && !PUSHING && !pointerOnChrome(PTR) && !pointerInDockBand(PTR);
+                const bool HOVER  = FFM && !g_cursorRiding && !PUSHING && !pointerOnChrome(PTR);
                 if (m_asCanvas && !g_canvasPanning && !m_zoomed && w && holds(w) && (!FFM || HOVER))
                     revealWindow(w, true, FROM != w ? FROM : PHLWINDOW{});
             });
@@ -308,7 +300,7 @@ namespace Hyprdrive::Mosaic {
             // window, and stays where it is (user, 2026-11-09: a dock click
             // that focused an app carried the pointer off the dock with the
             // pan, and the next click could not minimize).
-            if (pointerOnChrome(g_pInputManager->getMouseCoordsInternal()) || pointerInDockBand(g_pInputManager->getMouseCoordsInternal()))
+            if (pointerOnChrome(g_pInputManager->getMouseCoordsInternal()))
                 return;
             if (g_layoutManager && g_layoutManager->dragController()->target())
                 return;
@@ -430,23 +422,8 @@ namespace Hyprdrive::Mosaic {
             // eases there rather than arriving at once. Position only: a
             // window's size is never carried (a carried size resized every
             // client mid-pan, 896x596 -> 893x593 and back).
-            // Never for a window flying back from the dock: its flight aims at
-            // where the layout has it once the restore returns, so the view
-            // panning under it slid it in from the screen edge at full size
-            // (user, 2026-10-29: "you replaced my maximize from dock
-            // animation"). The restore focuses it BEFORE its flight exists,
-            // so that is asked of the flight controller -- and it still jumps
-            // the view and lets the slides play, exactly as it did.
             const bool JUST = animate && std::chrono::steady_clock::now() - m_rearrangedAt < std::chrono::milliseconds(600);
-            if (JUST && Hyprdrive::Flight::restoringForFlight(w)) {
-                trace(std::format("reveal after a re-arrangement: {}x{} -> {}x{} as window moves (restore flight)", m_canvasOffset.x, m_canvasOffset.y, WANT->x, WANT->y));
-                m_pan.on = false;
-                m_panCarry.clear();
-                m_canvasOffset = *WANT;
-                layoutCanvas(false);
-                return;
-            }
-            if (JUST && !Hyprdrive::Flight::hasFlight(w)) {
+            if (JUST) {
                 trace(std::format("reveal after a re-arrangement: {}x{} -> {}x{}, panned, windows carried from where they are", m_canvasOffset.x, m_canvasOffset.y, WANT->x,
                                   WANT->y));
                 captureCarry();
@@ -510,9 +487,6 @@ namespace Hyprdrive::Mosaic {
         bool pushThrough(const Vector2D& lost) {
             if (!Hyprdrive::Config::getValue<bool>("plugin:hyprdrive:mosaic:edge_push"))
                 return false;
-            // A dock menu or fan is up: the push is not the canvas's.
-            if (Hyprdrive::Stacks::isOpen() || Hyprdrive::Dock::menuOpen())
-                return false;
             if (!m_asCanvas || m_zoomed || !shownNow())
                 return false;
             const auto VIEW = canvasViewNow();
@@ -558,7 +532,7 @@ namespace Hyprdrive::Mosaic {
         bool pointerLeftPushFor(const PHLWINDOW& pf) {
             const Vector2D P = g_pInputManager->getMouseCoordsInternal();
             const auto     W = Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-            if (!W || W == pf || pointerOnChrome(P) || pointerInDockBand(P))
+            if (!W || W == pf || pointerOnChrome(P))
                 return false;
             g_hoverStale = true;
             if (hoverRefresh(false))
@@ -585,7 +559,7 @@ namespace Hyprdrive::Mosaic {
             // window within MARGIN of the pointer counts, the nearest first.
             constexpr double MARGIN = 40.0;
             const Vector2D   P      = g_pInputManager->getMouseCoordsInternal();
-            if (pointerOnChrome(P) || pointerInDockBand(P))
+            if (pointerOnChrome(P))
                 return; // the push goes on; the focus waits until the pointer leaves the dock
             PHLWINDOW        best;
             double           bestD = MARGIN + 1;
@@ -1611,18 +1585,6 @@ namespace Hyprdrive::Mosaic {
             }
             // The arrangement changed: the pan was aimed at the old one.
             m_rearrangedAt = std::chrono::steady_clock::now();
-            // A window coming back from the dock re-arranged it: its flight
-            // aims at where this pass lays it, so the pan is committed here
-            // as it always was (the 2026-10-29 restore, revealWindow).
-            const bool RESTORING = std::ranges::any_of(m_canvasWho, [](const auto& t) {
-                const auto T = t.lock();
-                return T && Hyprdrive::Flight::restoringForFlight(T->window());
-            });
-            if (m_pan.on && RESTORING) {
-                m_canvasOffset = m_pan.to;
-                m_pan.on       = false;
-                m_panCarry.clear();
-            }
             if (m_pan.on) {
                 // A PAN UNDER WAY NEVER TURNS INSTANT (owner, 2026-11-11). It
                 // used to be committed here -- the view at its end in one frame,
@@ -1668,8 +1630,7 @@ namespace Hyprdrive::Mosaic {
                 // just re-arranged): the rest of their gap, on the pan's curve.
                 // Not a window popping in (followPan's), nor one in flight.
                 const auto WIN = T->window();
-                if (warp && m_pan.on && i < m_panCarry.size() && m_panCarry[i].on && WIN && !WIN->presentation().animatingIn() && !Hyprdrive::Flight::hasFlight(WIN) &&
-                    !Hyprdrive::Flight::restoringForFlight(WIN)) {
+                if (warp && m_pan.on && i < m_panCarry.size() && m_panCarry[i].on && WIN && !WIN->presentation().animatingIn()) {
                     const double LEFT = 1.0 - std::clamp(m_panE, 0.0, 1.0);
                     const auto&  C    = m_panCarry[i];
                     const double X = std::round(BOX.x + C.pos.x * LEFT), Y = std::round(BOX.y + C.pos.y * LEFT);
@@ -1706,7 +1667,7 @@ namespace Hyprdrive::Mosaic {
             for (size_t i = 0; i < m_canvasWho.size(); ++i) {
                 const auto T = m_canvasWho[i].lock();
                 const auto W = T ? T->window() : PHLWINDOW{};
-                if (!W || !W->positionAnimation() || Hyprdrive::Flight::hasFlight(W) || Hyprdrive::Flight::restoringForFlight(W))
+                if (!W || !W->positionAnimation())
                     continue;
                 const auto& R   = m_canvas.rects[i];
                 const auto     POS = W->positionAnimation()->value();
@@ -2233,19 +2194,6 @@ namespace Hyprdrive::Mosaic {
                 return std::nullopt;
             const auto SPACE = m_parent->space();
             CBox       AREA  = SPACE->workArea();
-            // THE DOCK'S BAND (dock:windows_make_room, autohide off): DockRoom
-            // shortens any tile under the pill after the fact, which would squash
-            // the mosaic's bottom row out of its proportions. The mosaic keeps
-            // out of that band instead -- one tile gap above the pill, the gap
-            // DockRoom leaves -- and centres in what is left.
-            if (const auto MON = SPACE->workspace() ? SPACE->workspace()->m_monitor.lock() : PHLMONITOR{}) {
-                const CBox PILL = Dock::roomPillGlobal(MON);
-                if (PILL.w >= 1 && PILL.h >= 1) {
-                    static auto  PBORDER = CConfigValue<::Config::INTEGER>("general:border_size");
-                    const double LIMIT   = PILL.y - innerGap() - std::max<int64_t>(0, *PBORDER);
-                    AREA.h               = std::min(AREA.h, LIMIT - AREA.y);
-                }
-            }
             if (AREA.w < 1 || AREA.h < 1)
                 return std::nullopt;
             return AREA;

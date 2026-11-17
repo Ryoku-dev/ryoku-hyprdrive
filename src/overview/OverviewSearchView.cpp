@@ -163,11 +163,10 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
     out.drawable = true;
     out.pill     = pill;
 
-    // Same rounding the workspace cards and the strip use: decoration:rounding
-    // (0 on Omarchy) and decoration:rounding_power. Clamped per-box at draw.
-    const auto CARDROUND = getOverviewCardRounding(MONITOR, IN.renderScale);
-    out.rounding         = CARDROUND.rounding;
-    out.roundingPower    = CARDROUND.power;
+    // The desktop's style (getOverviewChromeRounding). Clamped per-box at draw.
+    const auto CHROME = getOverviewChromeRounding(MONITOR, Hyprdrive::Look::current().cuts.large);
+    out.rounding      = CHROME.rounding;
+    out.roundingPower = CHROME.power;
 
     // Everything inside the pill is measured off the box as it actually landed,
     // so the badge and the type follow the card transform for free.
@@ -409,8 +408,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
         out.inspector.subtitle = ROW.description;
         out.inspector.icon     = ROW.icon;
 
-        if (ROW.omarchy) {
-            const auto& o = *ROW.omarchy;
+        if (ROW.backend) {
+            const auto& o = *ROW.backend;
             out.inspector.category     = o.category;
             out.inspector.canQuickLook = o.canQuickLook;
             if (o.kind == SearchBackend::EItemKind::File) {
@@ -607,7 +606,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
     const auto ACCENT    = Hyprdrive::Config::highlightColor();
 
     if (DRAWPILL)
-        OverviewRender::themePlate(PILL, PILLROUND, POWER, FADE, false, pillLit, Hyprdrive::BorderFade::key("search-pill", renderMonitorId()));
+        OverviewRender::themePlate(PILL, PILLROUND, POWER, FADE, pillLit, Hyprdrive::BorderFade::key("search-pill", renderMonitorId()));
 
     CRectPassElement::SRectData badgeBg;
     badgeBg.box           = BADGE;
@@ -642,7 +641,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
 
     if (DRAWBODY) {
     if (L.containerBox.width > 1.F) {
-        OverviewRender::themePlate(L.containerBox, roundFor(L.containerBox), POWER, FADE, true, resultsLit, Hyprdrive::BorderFade::key("search-results", renderMonitorId()));
+        OverviewRender::themePlate(L.containerBox, roundFor(L.containerBox), POWER, FADE, resultsLit, Hyprdrive::BorderFade::key("search-results", renderMonitorId()));
 
         for (const auto& divBox : L.dividers) {
             CRectPassElement::SRectData div;
@@ -1453,8 +1452,8 @@ void COverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     searchLayoutHere()     = std::move(LAYOUT);
 
     if (QUERIED && g_search.nav.selection >= 0 && g_search.nav.selection < sc<int>(RESULTS.size())) {
-        if (RESULTS[g_search.nav.selection].omarchy && !RESULTS[g_search.nav.selection].omarchy->filePath.empty()) {
-            SearchBackend::updateSushiIfActive(RESULTS[g_search.nav.selection].omarchy->filePath);
+        if (RESULTS[g_search.nav.selection].backend && !RESULTS[g_search.nav.selection].backend->filePath.empty()) {
+            SearchBackend::updateSushiIfActive(RESULTS[g_search.nav.selection].backend->filePath);
         }
     }
 
@@ -1524,8 +1523,8 @@ static const std::string* searchPreviewPath(const std::vector<SSearchRow>& resul
     if (index < 0 || index >= sc<int>(results.size()))
         return nullptr;
     const auto& ROW = results[sc<size_t>(index)];
-    if (ROW.omarchy && ROW.omarchy->canQuickLook && !ROW.omarchy->filePath.empty())
-        return &ROW.omarchy->filePath;
+    if (ROW.backend && ROW.backend->canQuickLook && !ROW.backend->filePath.empty())
+        return &ROW.backend->filePath;
     return nullptr;
 }
 
@@ -1603,9 +1602,9 @@ bool overviewHandleCtrlTap() {
     const auto RESULTS = overviewSearchRows();
 
     const auto agentAt = [&](int idx) -> std::optional<SearchBackend::SSearchItem> {
-        if (idx < 0 || idx >= sc<int>(RESULTS.size()) || !RESULTS[sc<size_t>(idx)].omarchy)
+        if (idx < 0 || idx >= sc<int>(RESULTS.size()) || !RESULTS[sc<size_t>(idx)].backend)
             return std::nullopt;
-        const auto& ITEM = *RESULTS[sc<size_t>(idx)].omarchy;
+        const auto& ITEM = *RESULTS[sc<size_t>(idx)].backend;
         return SearchBackend::canBeDefaultAgent(ITEM) ? std::optional{ITEM} : std::nullopt;
     };
 
@@ -1617,7 +1616,7 @@ bool overviewHandleCtrlTap() {
 
     const auto REORDERED = overviewSearchRows();
     for (size_t i = 0; i < REORDERED.size(); ++i) {
-        if (REORDERED[i].omarchy && REORDERED[i].omarchy->id == item->id) {
+        if (REORDERED[i].backend && REORDERED[i].backend->id == item->id) {
             g_search.nav.selection = sc<int>(i);
             break;
         }

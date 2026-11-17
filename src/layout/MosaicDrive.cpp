@@ -17,7 +17,6 @@
 #undef private
 
 #include "MosaicDrive.hpp"
-#include "FlightController.hpp"
 
 namespace Hyprdrive::MosaicDrive {
     void drawAt(const PHLWINDOW& w, const CBox& box) {
@@ -66,7 +65,7 @@ namespace Hyprdrive::MosaicDrive {
         // with its size animating too (and sets m_animatingIn); centring it here
         // took its flight over (user, 2026-10-29: "you replaced my maximize from
         // dock animation").
-        if (!w->presentation().animatingIn() || Hyprdrive::Flight::hasFlight(w))
+        if (!w->presentation().animatingIn())
             return false;
         const auto GP = w->m_realPosition->goal(), GS = w->m_realSize->goal(), S = w->m_realSize->value();
         w->m_realPosition->setValue(GP + (GS - S) / 2.0);

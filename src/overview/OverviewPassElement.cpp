@@ -139,7 +139,7 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw(Render::CRenderCont
     // UV-sample into the rounded panel. Thin damage + native renderRect blur
     // (X95) under-delivers the pass pyramid on a strip/dock/pill vs large window
     // surfaces even when size/passes match on paper. Fade is data.alpha on the
-    // sample only — never the kawase radius.
+    // sample only -- never the kawase radius.
     //
     // xray=true  → private chrome FB (X92 capture: full mon, a=1).
     // xray=false → live blurMainFramebuffer(1, full mon) right now.

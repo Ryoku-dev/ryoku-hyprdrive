@@ -98,7 +98,7 @@ static std::set<char32_t> sourceGlyphs() {
 int main() {
     // 1. The source's glyphs are all in the table, with art.
     const auto USED = sourceGlyphs();
-    CHECK(USED.size() >= 30); // the scan itself works (37 at the time of writing)
+    CHECK(USED.size() >= 5); // the scan itself works (6 since the dock went)
     for (const char32_t CP : USED) {
         const bool HAS = Glyphs::hasSvg(CP);
         if (!HAS)

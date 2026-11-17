@@ -391,7 +391,7 @@ namespace Hyprdrive::KeyboardCat {
             return;
 
         const int RND = std::min({rounding, sc<int>(box.height / 2.0), sc<int>(box.width / 2.0)});
-        OverviewRender::themePlate(box, RND, roundingPower, fade, false, true);
+        OverviewRender::themePlate(box, RND, roundingPower, fade, true);
 
         // The picture fades in over the last part of the opening, out with the fold.
         const float PICA = fade * std::clamp((E - 0.6F) / 0.4F, 0.F, 1.F);

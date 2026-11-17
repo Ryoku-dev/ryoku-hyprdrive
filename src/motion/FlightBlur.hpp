@@ -1,28 +1,15 @@
 #pragma once
 
-// MOTION BLUR FOR THE MINIMIZE / RESTORE FLIGHT (user, 2026-09-29: "add motion
-// blur to the maximize and minimize animations (both in and outside of
-// overview) - same motion blur as my dock fan stacks").
+// MOTION BLUR for what Hyprdrive moves: the mean of N instants across the time
+// one frame covers. Hyprland already knows how to motion-blur a window
+// (decoration:motion_blur), but that is global and off, and turning it on
+// would blur every window the user drags. So the plugin drives the same
+// renderer path itself, for its own animations only: a draw is redirected into
+// a nested pass and queued as one transformed element carrying the motion
+// (drawBlurred), and a window moved by a retile gets a transformer the plugin
+// owns for as long as it moves (trackLayoutMotion).
 //
-// The same blur the fan wears -- the mean of N instants across the time one
-// frame covers -- but not the same machinery, because a flight is a WINDOW:
-// shadow, rounded corners, border, subsurfaces, frost. Hyprland 0.56 already
-// knows how to motion-blur a window (decoration:motion_blur): it renders the
-// window into a work buffer and composites that buffer with a shader that
-// averages N samples along the previous->current box. That setting is global
-// and off, and turning it on would blur every window the user drags. So the
-// plugin drives the same renderer path itself, for the flying window only:
-//
-//   * PROXY flights (every minimize; a restore with the overview open) are
-//     drawn by the dock. Their whole draw -- shadow, window, border -- is
-//     redirected into a nested pass and queued as ONE transformed-window
-//     element carrying the motion. Everything smears together.
-//   * DRIVEN flights (a restore on the desktop) are the real window, drawn by
-//     Hyprland's own window pass. It gets a window transformer the plugin owns
-//     for as long as it flies; the transformer hands the renderer the motion.
-//
-// Nothing here runs when dock:minimize_motion_blur is 0 or the window is not
-// moving.
+// Nothing here runs when a site's strength is 0 or the window is not moving.
 
 #include "globals.hpp"
 
@@ -43,7 +30,6 @@ namespace Hyprdrive::FlightBlur {
     // with. Config.cpp registers motion_blur:<name>:strength / :fade from this
     // table; shape() reads them.
     enum class ESite : uint8_t {
-        MINIMIZE,       // the minimize / restore flight and the labels riding it
         LAYOUT,         // a retile, a window opening (dwindle, scrolling)
         FLICK,          // the scrolling tape, above the flick speed
         SWIPE,          // a trackpad desktop swipe
@@ -53,7 +39,6 @@ namespace Hyprdrive::FlightBlur {
         SEARCH_TILES,   // tiles moving as a search filters them
         SEARCH_PANE,    // the search results pane growing / shrinking
         DRAG,           // the overview's drag proxy resizing
-        STACK_PANE,     // a dock stack's grid pane opening / closing
         DESKTOP_SLIDE,  // Hyprland's desktop slide outside the overview (a bind, Super+scroll, a dock click)
         WHEEL_PAN,      // switching desktops in the overview by mouse wheel / Super+scroll
     };
@@ -64,7 +49,6 @@ namespace Hyprdrive::FlightBlur {
         const char* fade;
     };
     inline constexpr SSite SITES[] = {
-        {"minimize", "minimize / restore flight", 1.F, "early"},
         {"layout", "window retile and open", 1.F, "early"},
         {"flick", "scrolling layout flick", 0.5F, "early"},
         {"swipe", "trackpad desktop swipe", 0.5F, "constant"},
@@ -74,7 +58,6 @@ namespace Hyprdrive::FlightBlur {
         {"search_tiles", "search tile motion", 0.25F, "constant"},
         {"search_pane", "search results pane", 0.5F, "early"},
         {"drag", "overview drag resize", 1.F, "constant"},
-        {"stack_pane", "dock stack grid pane", 1.F, "early"},
         // (user, 2026-10-16: "yes with an option" -- both; strength 0 = off.)
         {"desktop_slide", "desktop switch slide outside the overview", 0.5F, "early"},
         {"wheel_pan", "overview wheel desktop switch", 0.25F, "constant"},
@@ -91,7 +74,7 @@ namespace Hyprdrive::FlightBlur {
     // prev by the frame-rate ratio (the shutter, FlightBlur.cpp).
     CBox shape(ESite site, const CBox& prev, const CBox& cur, float progress);
 
-    // dock:minimize_motion_blur, clamped; below 2 means off.
+    // motion_blur:samples, clamped; below 2 means off.
     int samples();
 
     // Draws `draw` (which queues the flight's shadow, window and border) as one
@@ -99,7 +82,7 @@ namespace Hyprdrive::FlightBlur {
     // px. Returns false, having queued nothing, when blur is off or there is no
     // motion -- the caller then draws the ordinary way.
     // `window` may be null (the dock stack's pane is not a window).
-    // `samplesOverride` >= 0 replaces dock:minimize_motion_blur (the overview's
+    // `samplesOverride` >= 0 replaces motion_blur:samples (the overview's
     // drag proxy uses the layout blur's samples).
     bool drawBlurred(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& prevBox, const CBox& box, const std::function<void()>& draw, int samplesOverride = -1);
 
@@ -111,10 +94,6 @@ namespace Hyprdrive::FlightBlur {
     // the animation is, 0..1; the returned box is `prev` pulled toward `cur` so
     // that motion blur covers only what is left of the smear.
     CBox fadeMotion(const CBox& prev, const CBox& cur, float progress);
-
-    // A driven flight moved the real window prevBox -> box (monitor-local
-    // RENDER px) this frame; the NEXT window pass draws it there, blurred.
-    void recordDriven(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& prevBox, const CBox& box);
 
     // Drop the transformer from every window `stillFlying` says no to. Called
     // after each flight frame, so a landed or aborted flight never leaves a

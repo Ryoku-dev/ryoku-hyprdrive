@@ -470,15 +470,8 @@ void COverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperMode, c
     const auto PREV_NOISE    = Hyprdrive::Config::getValue<float>("decoration:blur:noise");
     const auto PREV_CONTRAST = Hyprdrive::Config::getValue<float>("decoration:blur:contrast");
     Hyprdrive::Config::setValue("decoration:blur:enabled", true);
-    // Omarchy's lockscreen look on Omarchy only. Off Omarchy (user, 2026-10-15:
-    // native takes Hyprland's settings, not Omarchy's) the backdrop is blurred
-    // with the user's own decoration:blur size, passes, noise and contrast.
-    if (Hyprdrive::Integration::omarchy()) {
-        Hyprdrive::Config::setValue("decoration:blur:size", LOCKSCREEN_BLUR_SIZE);
-        Hyprdrive::Config::setValue("decoration:blur:passes", LOCKSCREEN_BLUR_PASSES);
-        Hyprdrive::Config::setValue("decoration:blur:noise", 0.F);
-        Hyprdrive::Config::setValue("decoration:blur:contrast", LOCKSCREEN_BLUR_CONTRAST);
-    }
+    // The backdrop is blurred with the user's own decoration:blur size,
+    // passes, noise and contrast.
     auto restoreBlur = Hyprutils::Utils::CScopeGuard([PREV_ENABLED, PREV_SIZE, PREV_PASSES, PREV_NOISE, PREV_CONTRAST, monitor] {
         Hyprdrive::Config::setValue("decoration:blur:enabled", PREV_ENABLED);
         Hyprdrive::Config::setValue("decoration:blur:size", PREV_SIZE);

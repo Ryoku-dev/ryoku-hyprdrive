@@ -20,7 +20,40 @@ static int s_testsPassed = 0;
     s_testsPassed++; \
 } while (0)
 
+namespace fs = std::filesystem;
+
+// Every agent installed as a stand-in that asks for bracketed paste and records
+// what it is typed, on a PATH of the test's own, opened bare ("{cmd}") instead
+// of in a terminal window.
+static fs::path s_dir, s_bin;
+static void fakeAgents() {
+    char tmpl[] = "/tmp/hd-agent-test-XXXXXX";
+    s_dir = mkdtemp(tmpl);
+    s_bin = s_dir / "bin";
+    fs::create_directories(s_bin);
+    const fs::path FAKE = s_dir / "fake-agent.py";
+    std::ofstream(FAKE) << "import os, sys\n"
+                           "sys.stdout.write('\\x1b[?2004hagent> '); sys.stdout.flush()\n"
+                           "got = b''\n"
+                           "while not (b'\\x1b[201~' in got and got.endswith(b'\\n')):\n"
+                           "    c = os.read(0, 4096)\n"
+                           "    if not c: break\n"
+                           "    got += c\n"
+                           "open(os.environ['HD_GOT'], 'wb').write(got)\n";
+    for (const char* A : {"grok", "agy", "gemini", "claude", "opencode", "codex", "copilot", "crush", "pi"})
+        std::ofstream(s_bin / A) << "#!/bin/sh\nexec python3 '" << FAKE.string() << "'\n";
+    for (const auto& E : fs::directory_iterator(s_bin))
+        fs::permissions(E.path(), fs::perms::owner_all);
+    setenv("PATH", (s_bin.string() + ":/usr/bin:/bin").c_str(), 1);
+    setenv("XDG_CONFIG_HOME", (s_dir / "config").c_str(), 1);
+    SearchBackend::SHost host;
+    host.terminalTemplate = [] { return std::string{"{cmd}"}; };
+    SearchBackend::setHost(host);
+}
+
 int main() {
+    fakeAgents();
+
     // 1. Calculator tests
     {
         auto calc1 = SearchBackend::evaluateCalculator("2 + 2");
@@ -97,9 +130,9 @@ int main() {
         CHECK(agyResults.front().agentPrompt == "solve this problem" && agyResults.front().actionCommand.find("solve") == std::string::npos);
 
         auto all = SearchBackend::promptAllAgents("what is the weather today");
-        // Sentence queries only list agents that are installed and logged in
-        // (usage record with ready:true), not the full catalog.
-        CHECK(all.size() < 8);
+        // Sentence queries list every installed agent, never the Default Agent
+        // row (it is one of them under a second name).
+        CHECK(all.size() == 9);
         for (const auto& it : all) {
             CHECK(it.description == "what is the weather today");
             CHECK(it.agentPrompt == "what is the weather today" && it.actionCommand.find("weather") == std::string::npos);
@@ -111,25 +144,18 @@ int main() {
         CHECK(!SearchBackend::isGlyphIcon("/usr/share/pixmaps/x.svg"));
     }
 
-    // 3. Omarchy Menu Actions Search — must not fork. The old path ran
-    // system("bash -c when") for every menu row on the first query and froze
-    // the compositor for seconds.
-    // The menu is the test's own file, in Omarchy's schema: the installed one
-    // exists only on Omarchy, and this must pass anywhere.
+    // 3. Menu search -- must not fork. The old path ran system("bash -c when")
+    // for every menu row on the first query and froze the compositor for
+    // seconds. The user's own menu.jsonc nests rows beside the System column.
     {
-        static std::string s_menu;
-        char               tmpl[] = "/tmp/hd-menu-test-XXXXXX";
-        s_menu                    = std::string(mkdtemp(tmpl)) + "/omarchy-menu.jsonc";
-        std::ofstream(s_menu) << "{\n  // a comment, as the real file has\n"
+        const fs::path MENU = s_dir / "config" / "hyprdrive" / "menu.jsonc";
+        fs::create_directories(MENU.parent_path());
+        std::ofstream(MENU) << "{\n  // a comment, as the real file has\n"
                                  "  \"install\": {\"icon\":\"\uF249\",\"label\":\"Install\"},\n"
                                  "  \"system\": {\"icon\":\"\uF249\",\"label\":\"System\"},\n"
                                  "  \"system.lock\": {\"icon\":\"\uF249\",\"label\":\"Lock\",\"action\":\"true\"},\n"
                                  "  \"install.package\": {\"icon\":\"\uF249\",\"label\":\"Package\",\"action\":\"true\"},\n"
                                  "}\n";
-        SearchBackend::SHost host;
-        host.systemMenu = [] { return s_menu; };
-        SearchBackend::setHost(host);
-
         const auto t0 = std::chrono::steady_clock::now();
         auto menuResults = SearchBackend::searchMenu("lock", 5);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -167,8 +193,6 @@ int main() {
         CHECK(hasBack);
         CHECK(hasPackage);
         SearchBackend::resetMenuRoute();
-        SearchBackend::setHost({});
-        std::filesystem::remove_all(std::filesystem::path(s_menu).parent_path());
     }
 
     // 4. File search is idle until a query is issued
@@ -198,14 +222,8 @@ int main() {
     // command, run through bash with stand-in launchers and agents and the real
     // agent-run, gets it typed byte for byte and the file is gone after.
     {
-        namespace fs = std::filesystem;
-        char tmpl[] = "/tmp/hd-agent-test-XXXXXX";
-        const fs::path DIR = mkdtemp(tmpl);
-        const fs::path USAGE = DIR / "omarchy/agents/usage";
-        fs::create_directories(USAGE);
-        for (const char* ID : {"grok", "antigravity", "gemini", "claude", "opencode", "codex", "copilot", "crush", "pi", "agent"})
-            std::ofstream(USAGE / (std::string(ID) + ".json")) << "{\"ready\": true}";
-        setenv("XDG_STATE_HOME", DIR.c_str(), 1);
+        const fs::path DIR = s_dir;
+        const fs::path BIN = s_bin;
         const fs::path RUN = DIR / "run";
         fs::create_directories(RUN);
         fs::permissions(RUN, fs::perms::owner_all, fs::perm_options::replace);
@@ -214,33 +232,14 @@ int main() {
         // agent-run beside this binary, where agentRunner() looks.
         const fs::path RUNNER = SearchBackend::agentRunner();
         CHECK(!RUNNER.empty());
-        fs::copy_file("ui/bin/agent-run", RUNNER, fs::copy_options::overwrite_existing);
+        fs::copy_file("bin/agent-run", RUNNER, fs::copy_options::overwrite_existing);
         fs::permissions(RUNNER, fs::perms::owner_all);
-
-        const fs::path BIN = DIR / "bin";
-        fs::create_directories(BIN);
-        // The launcher drops its --app-id and runs the rest here; every agent
-        // asks for bracketed paste and records what it is typed.
-        std::ofstream(BIN / "omarchy-launch-tui") << "#!/bin/sh\nshift\nexec \"$@\"\n";
-        const fs::path FAKE = DIR / "fake-agent.py";
-        std::ofstream(FAKE) << "import os, sys\n"
-                               "sys.stdout.write('\\x1b[?2004hagent> '); sys.stdout.flush()\n"
-                               "got = b''\n"
-                               "while not (b'\\x1b[201~' in got and got.endswith(b'\\n')):\n"
-                               "    c = os.read(0, 4096)\n"
-                               "    if not c: break\n"
-                               "    got += c\n"
-                               "open(os.environ['HD_GOT'], 'wb').write(got)\n";
-        for (const char* A : {"grok", "agy", "gemini", "claude", "opencode", "codex", "copilot", "crush", "pi", "omarchy-agent"})
-            std::ofstream(BIN / A) << "#!/bin/sh\nexec python3 '" << FAKE.string() << "'\n";
-        for (const auto& E : fs::directory_iterator(BIN))
-            fs::permissions(E.path(), fs::perms::owner_all);
 
         const fs::path    CANARY = DIR / "pwned";
         const std::string TOUCH  = "$(touch " + CANARY.string() + ")";
         const std::string PROMPT = "SECRET-7f3a fix " + TOUCH + " and `touch " + CANARY.string() + "` for $HOME's \"quoted\" \\ %P% it's\nsecond line";
         const auto        ITEMS  = SearchBackend::promptAllAgents(PROMPT);
-        CHECK(ITEMS.size() == 10);
+        CHECK(ITEMS.size() == 9);
         for (const auto& IT : ITEMS) {
             CHECK(IT.actionCommand.find("SECRET") == std::string::npos);
             CHECK(IT.actionCommand.find("touch") == std::string::npos);

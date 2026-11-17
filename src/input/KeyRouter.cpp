@@ -116,47 +116,6 @@ void                registerRawKeyHooks() {
                     info.cancelled = true;
                     return;
                 }
-                // V11 SPEC V5. SPACE PREVIEWS THE HOVERED FAN/GRID ITEM.
-                //
-                // THE SCOPE IS THE FEATURE. previewHovered() claims the key
-                // only when a stack popup is open AND the pointer is over one
-                // of its file rows -- two conditions that are false in every
-                // other state this compositor is ever in, including with the
-                // dock right there and a stack pinned. Everywhere else the
-                // call is a null check and a walk of an empty vector, and the
-                // key falls through to the focused window exactly as before.
-                // A space that went missing in a text editor would be a far
-                // bigger bug than this is a feature, so the claim is decided
-                // by the same read that decides what to preview: no item, no
-                // claim (see DockStacks::previewHovered).
-                //
-                // AHEAD of handleSearchPress, and that ordering is not an
-                // accident: while the overview is open handleSearchPress
-                // consumes SPACE unconditionally -- G1's rule that whitespace
-                // must never START a search still keeps the key rather than
-                // typing it into a window the user cannot see. A fan opened
-                // over the overview would otherwise never see the press.
-                // Dock stacks A: an open fan/pane owns ITS keys (arrows, Enter,
-                // Esc, Space; the pane also types). handleKey claims SPACE only
-                // when there is an item to preview, so everywhere else the key
-                // falls through untouched -- the scope rule above still holds.
-                // Neither a stack popup nor the Rename field takes a CHORD (Super/
-                // Ctrl/Alt held) or a desktop key (Print, volume, brightness):
-                // those always reach their binds (review 2026-09-24).
-                const bool PLAINKEY = g_heldGuardKeys.empty() && !isGlobalPassthroughKeycode(event.keycode);
-
-                // The dock menu's Rename field, while it is up, owns the keyboard.
-                if (PLAINKEY && Hyprdrive::Dock::menuWantsKeyboard() && Hyprdrive::Dock::menuHandleKey(event.keycode)) {
-                    g_consumedPresses.insert(event.keycode);
-                    info.cancelled = true;
-                    return;
-                }
-                if (PLAINKEY && Hyprdrive::Stacks::keyboardActive() && Hyprdrive::Stacks::handleKey(event.keycode)) {
-                    g_consumedPresses.insert(event.keycode);
-                    info.cancelled = true;
-                    return;
-                }
-
                 if (event.keycode == EVDEV_KEY_SPACE) {
                     if (overviewAcceptsSearch()) {
                         if (overviewHandleSearchSpace()) {

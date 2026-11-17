@@ -1,7 +1,6 @@
 #include "IdentityLive.hpp"
 
 #include "AppSearch.hpp"
-#include "Dock.hpp"
 #include "Engine.hpp"
 #include "GameApps.hpp"
 #include "LiveGatherer.hpp"
@@ -168,10 +167,6 @@ namespace Hyprdrive::AppIdentity {
         void changed() {
             ++g_generation;
             Membership::bump("identity");
-            if (State::monitorState())
-            for (const auto& M : State::monitorState()->monitors())
-                    if (M)
-                        Dock::damageIfChanged(M);
         }
 
         // Every window again: the inventory or the indexes changed under them.
@@ -234,10 +229,6 @@ namespace Hyprdrive::AppIdentity {
                     if (OLDGROUP == s.group && OLD.displayName == s.id.displayName && OLD.icon.value == s.id.icon.value && OLD.placeable == s.id.placeable)
                         continue;
                     dirty = true;
-                    // Late: the new app's "Always Open in", within 1.5 s of the map,
-                    // when the old answer did not already carry it.
-                    if (OLDGROUP != s.group && NOW - s.mappedAt <= LATE_APPLY && LW->second->mapped())
-                        Dock::onWindowOpen(LW->second);
                 }
                 if (dirty)
                     changed();

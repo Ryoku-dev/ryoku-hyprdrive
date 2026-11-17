@@ -1,6 +1,7 @@
 #include "OverviewRender.hpp"
 #include "IdentityLive.hpp"
 #include "OverviewPassElement.hpp"
+#include "Look.hpp"
 #include <chrono>
 #include <cstring>
 #include <vector>
@@ -18,14 +19,12 @@
 #include <format>
 #include <hyprgraphics/image/Image.hpp>
 #include "AppSearch.hpp"
-#include "Dock.hpp"
 #include "IconSize.hpp"
 #include "ImageGuard.hpp"
 #include "BuiltinIcons.hpp"
 #include "Fonts.hpp"
 #include "Glyphs.hpp"
 #include "Config.hpp"
-#include "TextScale.hpp"
 #include "BorderFade.hpp"
 #include "PlateColor.hpp"
 #include <hyprland/src/render/pass/TexPassElement.hpp>
@@ -50,7 +49,7 @@
 namespace OverviewRender {
 
 // X92. Private FB holding the overview chrome blur for the rest of the frame.
-// g_frameChromeBlur is always chromeBlurFB->getTexture() when valid — never a
+// g_frameChromeBlur is always chromeBlurFB->getTexture() when valid -- never a
 // transient blurMainFramebuffer() result.
 //
 // One PER MONITOR: every monitor's overview captures it at the start of its own
@@ -452,10 +451,6 @@ namespace {
         for (const auto& W : Desktop::windowState()->windows())
             if (W && W->mapped())
                 push(AppSearch::iconForClass(Hyprdrive::AppIdentity::groupKey(W)));
-        // The dock's icons at the size each monitor draws them (an autohidden
-        // dock's first slide-in decoded them on its opening frames otherwise).
-        for (const auto& [NAME, PX] : Hyprdrive::Dock::iconWarmList())
-            push(NAME, PX);
     }
 
     // THE FIRST KEYSTROKE'S LABELS. Once the icons are in, the same timer
@@ -881,11 +876,6 @@ static SP<Render::ITexture> textImpl(const std::string& str, const CHyprColor& c
     // that do not pin a family inherit that. Bound by REFERENCE: themeFontFamily
     // hands back its cache, and this runs on every probe.
     const std::string& FAMILY = fontFamily.empty() ? Hyprdrive::Config::themeFontFamily() : fontFamily;
-    // Every caller's size is one drawn against Omarchy's default text size; it
-    // follows the size the system is set to (TextScale.hpp, #8). Before the
-    // cache key, which holds it.
-    fontSize = Hyprdrive::TextScale::scaled(fontSize, Hyprdrive::Config::themeTextScale());
-
     // A label that FITS is the same pixels at any maxWidth (renderText sizes
     // the texture to the text, ellipsising only past the limit), so maxWidth
     // leaves the key unless it actually cuts the label. Callers pass the
@@ -1083,10 +1073,6 @@ SP<Render::ITexture> textWrapped(const std::string& str, const CHyprColor& color
     }
 
     const std::string& FAMILY = fontFamily.empty() ? Hyprdrive::Config::themeFontFamily() : fontFamily;
-    // Every caller's size is one drawn against Omarchy's default text size; it
-    // follows the size the system is set to (TextScale.hpp, #8). Before the
-    // cache key, which holds it.
-    fontSize = Hyprdrive::TextScale::scaled(fontSize, Hyprdrive::Config::themeTextScale());
     const std::string  KEY    = std::format("{}\x1f{}\x1f{:x}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}", str, FAMILY, color.getAsHex(), fontSize, maxW, maxH, weight, (italic ? 1 : 0) | (centred ? 2 : 0));
     if (const auto IT = g_wrapCache.find(KEY); IT != g_wrapCache.end())
         return IT->second;
@@ -1190,49 +1176,44 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     g_pHyprRenderer->context().m_pass.add(makeUnique<COverviewBlurPassElement>(data));
 }
 
-void themePlate(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, bool lit, uint64_t fadeKey) {
+void themePlate(const CBox& box, int rounding, float roundingPower, float alpha, bool lit, uint64_t fadeKey) {
     if (box.empty() || alpha <= 0.F)
         return;
 
-    const int PASSES = Hyprdrive::Config::getValue<int>("decoration:blur:passes");
-    queueBlur(box, rounding, roundingPower, alpha, usePrecomputedBlur, PASSES);
-
-    const auto TINT = Hyprdrive::Config::dockBackgroundColor();
+    // A solid plane: Lithic chrome draws no blur (docs/lithic/design.md).
+    const auto PLATE = Hyprdrive::Config::chromePlate();
     CRectPassElement::SRectData bg;
     bg.box           = box;
-    bg.color         = CHyprColor{TINT.r, TINT.g, TINT.b, TINT.a * alpha};
+    bg.color         = PLATE.modifyA(PLATE.a * alpha);
     bg.round         = rounding;
     bg.roundingPower = roundingPower;
     g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(bg));
 
-    const int  BORDERSIZE = std::max(1, Hyprdrive::Config::getValue<int>("general:border_size"));
+    // Its 1 px hairline at rest (none in the round styles, whose stroke is
+    // clear), the mark of place when the pointer or the keyboard is on it.
+    const auto LIT     = Hyprdrive::Config::highlightColor();
+    const auto RESTING = Hyprdrive::Config::chromeStroke();
+    const auto STROKE  = fadeKey ? Hyprdrive::BorderFade::color(g_pHyprRenderer->context().m_data.pMonitor.lock(), fadeKey, lit, RESTING, LIT) : lit ? LIT : RESTING;
+    if (STROKE.a <= 0.F)
+        return;
     CBorderPassElement::SBorderData border;
-    border.box           = box.copy().round();
-    const auto LIT     = Hyprdrive::Config::highlightColor().modifyA(1.F);
-    const auto RESTING = Hyprdrive::Config::restingBorderColor();
-    border.grad1.reset(fadeKey ? Hyprdrive::BorderFade::color(g_pHyprRenderer->context().m_data.pMonitor.lock(), fadeKey, lit, RESTING, LIT) : lit ? LIT : RESTING);
+    border.box = box.copy().round();
+    border.grad1.reset(STROKE);
     border.a             = alpha;
-    border.borderSize    = BORDERSIZE;
+    border.borderSize    = 1;
     border.round         = rounding;
     border.roundingPower = roundingPower;
     g_pHyprRenderer->context().m_pass.add(makeUnique<CBorderPassElement>(border));
 }
 
-
-// X57 / X56. Shape from the host, palette and border from Hyprland.
-//
-//   .dash-label, .window-caption {
-//       background-color rgba(0,0,0,0.9); border 1px rgba(255,255,255,0.1);
-//       border-radius 999px; padding 6px 12px; color #ffffff }
-//
-// The PILL and the 12x6 padding ratio are the host's; the SIZE is the user's
-// ("make the tooltips bigger"); the BORDER is Hyprland's rather than that
-// stylesheet's white-10%, per X56, so it re-themes with everything else.
+// The title tag under a card, a strip cell or a Mosaic window: a tooltip in
+// the desktop's style. Lithic cuts it at the tooltip cut and rims it with the
+// vein hairline; the round styles make it a pill with no rim. The plane is the
+// overlay plane and the text the ink, so it reads on a light look as on a dark one.
 namespace {
     constexpr float PILL_FONT  = 16.F;
     constexpr float PILL_PAD_X = 16.F;
     constexpr float PILL_PAD_Y = 9.F;
-    constexpr float PILL_BG_A  = 0.90F;
 }
 
 void ringedPlate(const CBox& plate, int round, float roundingPower, const CHyprColor& ring, double ringPx, const CHyprColor& fill, float alpha) {
@@ -1278,7 +1259,7 @@ CBox labelPillBox(PHLMONITOR monitor, const std::string& str, double cx, double 
         return {};
 
     const float SCALE = std::max(scale, 0.01F);
-    const auto  TEX   = text(str, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(PILL_FONT * SCALE))), false, "", 0, 500);
+    const auto  TEX   = text(str, Hyprdrive::Config::themeForeground(), std::max(1, sc<int>(std::round(PILL_FONT * SCALE))), false, "", 0, 500);
     if (!TEX || !TEX->ok())
         return {};
 
@@ -1299,7 +1280,7 @@ CBox labelPill(PHLMONITOR monitor, const std::string& str, double cx, double bot
         return {};
 
     const float SCALE = std::max(scale, 0.01F);
-    const auto  TEX   = text(str, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(PILL_FONT * SCALE))), false, "", 0, 500);
+    const auto  TEX   = text(str, Hyprdrive::Config::themeForeground(), std::max(1, sc<int>(std::round(PILL_FONT * SCALE))), false, "", 0, 500);
     if (!TEX || !TEX->ok())
         return {};
 
@@ -1309,23 +1290,10 @@ CBox labelPill(PHLMONITOR monitor, const std::string& str, double cx, double bot
     if (plate.width < 1)
         return {};
 
-    // `border-radius: 999px` is a full pill, so the radius is half the height
-    // rather than a constant -- it stays a pill when the font or padding moves.
-    const int ROUND = sc<int>(std::round(plate.height / 2.0));
-
-    // The ring is Hyprland's (general:border_size, col.active_border); no
-    // border, no ring. ringedPlate fades ring and body as one surface.
-    const int  BORDER = std::max(0, Hyprdrive::Config::getValue<int>("general:border_size"));
-    CHyprColor ringColor{0.F, 0.F, 0.F, 0.F};
-    double     ringPx = 0.0;
-    if (BORDER > 0) {
-        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(Hyprdrive::Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
-            ACTIVE && !ACTIVE->m_colors.empty()) {
-            ringColor = ACTIVE->m_colors[0];
-            ringPx    = sc<double>(BORDER) * SCALE;
-        }
-    }
-    ringedPlate(plate, ROUND, 2.F, ringColor, ringPx, CHyprColor{0.F, 0.F, 0.F, PILL_BG_A}, alpha);
+    const float CORNER = Hyprdrive::Config::chromeCorner(Hyprdrive::Look::current().cuts.tooltip, plate.width / SCALE, plate.height / SCALE);
+    const int   ROUND  = sc<int>(std::round(std::min<double>(CORNER * SCALE, plate.height / 2.0)));
+    const auto  STROKE = Hyprdrive::Config::chromeStroke();
+    ringedPlate(plate, ROUND, Hyprdrive::Config::chromeCornerPower(), STROKE, STROKE.a > 0.F ? sc<double>(SCALE) : 0.0, Hyprdrive::Config::chromeOverlay(), alpha);
 
     CTexPassElement::SRenderData label;
     label.tex = TEX;

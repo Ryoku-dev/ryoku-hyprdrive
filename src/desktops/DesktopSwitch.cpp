@@ -171,7 +171,7 @@ namespace Hyprdrive::DesktopSwitch {
         }
 
         // Would Hyprland animate this workspace at all? animations:enabled and
-        // the workspaces / specialWorkspace leaf (Omarchy's looknfeel turns the
+        // the workspaces / specialWorkspace leaf (a theme may turn the
         // former leaf off). Off: there is nothing to make instant.
         bool hyprlandAnimates(const PHLWORKSPACE& ws, Animation::Workspace::eAnimationType type) {
             static auto PENABLED = CConfigValue<::Config::INTEGER>("animations:enabled");

@@ -56,12 +56,11 @@ namespace SearchProviders {
     // every warm() and every query generation, from either thread; null (the
     // default) = yes, the behaviour before the port.
     //
-    // main.cpp answers Integration::omarchy(). Off Omarchy the answer is NO:
-    // on a plain Hyprland session with GNOME apps installed, warm() at every
+    // main.cpp answers NO: on a plain Hyprland session with GNOME apps installed, warm() at every
     // overview open D-Bus-activated ~30 of them (nautilus, firefox, evolution,
     // gnome-software... measured on fedora's hyprtest) -- processes the user
     // never asked for, for rows the overview does not even draw today
-    // (docs/native/FEATURE-INVENTORY.md F2). So off Omarchy warm() does
+    // (docs/native/FEATURE-INVENTORY.md F2). So warm() does
     // nothing, and every search call goes out with NO_AUTO_START: a provider
     // whose app is ALREADY RUNNING still answers (a running Nautilus, a
     // running Settings), and one that is not fails at once with

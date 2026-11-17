@@ -456,7 +456,7 @@ void COverview::renderAltStrips(PHLMONITOR monitor, float renderScale, const Tim
                                                      layout);
         const int  PADPX      = std::max(0, sc<int>(std::round(sc<float>(FIRSTCELL.x) - sc<float>(PLATE.x))));
         const int  PLATEROUND = STYLE.round <= 0 ? 0 : STYLE.round + PADPX;
-        OverviewRender::themePlate(PLATE, PLATEROUND, STYLE.power, FADE, true, pointerOnChrome(PLATE),
+        OverviewRender::themePlate(PLATE, PLATEROUND, STYLE.power, FADE, pointerOnChrome(PLATE),
                                    Hyprdrive::BorderFade::key("strip-alt", (sc<uint64_t>(monitor->m_id) << 16) ^ (OTHERMON ? sc<uint64_t>(OTHERMON->m_id) : 0xFFFF)));
 
         const float MINIRENDERSCALE = renderScale * sc<float>(FIRSTCELL.height) / std::max(1.F, sc<float>(OTHERMON->m_size.y) * monitor->m_scale);
@@ -558,7 +558,7 @@ void COverview::renderScratchpadCell(PHLMONITOR monitor, float renderScale, cons
     if (PLATE.width > 1) {
         const int PADPX      = std::max(0, sc<int>(std::round(sc<float>(CELL.x) - sc<float>(PLATE.x))));
         const int PLATEROUND = STYLE.round <= 0 ? 0 : STYLE.round + PADPX;
-        OverviewRender::themePlate(PLATE, PLATEROUND, STYLE.power, FADE, true, pointerOnChrome(PLATE), Hyprdrive::BorderFade::key("strip-scratchpad", sc<uint64_t>(monitor->m_id)));
+        OverviewRender::themePlate(PLATE, PLATEROUND, STYLE.power, FADE, pointerOnChrome(PLATE), Hyprdrive::BorderFade::key("strip-scratchpad", sc<uint64_t>(monitor->m_id)));
     }
 
     // From here down the cell is built in the SAME order renderStripCell builds
@@ -609,7 +609,7 @@ void COverview::renderScratchpadCell(PHLMONITOR monitor, float renderScale, cons
             continue;
 
         renderWindowLive(monitor, SHOWN, MINI.copy().round(), MINIRENDERSCALE, now, &CELL, false, FADE);
-        Hyprdrive::Dock::pumpRetiled(SHOWN, monitor, now);
+        Hyprdrive::Retiled::pump(SHOWN, monitor, now);
     }
 
     // After the minis, so the target reads as a target even over a cell full of
@@ -976,7 +976,7 @@ void COverview::renderStripPanel(PHLMONITOR monitor, float renderScale, const SS
                 // Lit only while the pointer is on it or Tab has the keyboard
                 // in it; otherwise the resting tile border (user, 2026-09-27).
                 const bool LIT = (g_search.nav.zone == EOverviewNavZone::Desktop && activeScrollOverview().get() == this) || pointerOnChrome(PANEL);
-                OverviewRender::themePlate(PANEL, PANELROUND, STYLE.power, FADE, true, LIT, Hyprdrive::BorderFade::key("strip-desktops", sc<uint64_t>(monitor->m_id)));
+                OverviewRender::themePlate(PANEL, PANELROUND, STYLE.power, FADE, LIT, Hyprdrive::BorderFade::key("strip-desktops", sc<uint64_t>(monitor->m_id)));
             }
         }
     }
@@ -1121,7 +1121,7 @@ void COverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const C
         // an old buffer. Drawing it here shows that old buffer letterboxed inside
         // the new frame; this is what actually asks the client to redraw, for the
         // length of its grace and no longer.
-        Hyprdrive::Dock::pumpRetiled(WINDOW, monitor, now);
+        Hyprdrive::Retiled::pump(WINDOW, monitor, now);
     }
 
     // Tint and outline fade in and out on Hyprland's `border` animation, as a
@@ -1358,17 +1358,16 @@ void COverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::s
             hoveredIdx = images.size();
     }
 
-    const auto  CARDROUND = getOverviewCardRounding(monitor, renderScale);
+    // The cells are cut mid, the joins between them a token: the desktop's
+    // style turns both into its corners (getOverviewChromeRounding).
+    const auto& CUTS  = Hyprdrive::Look::current().cuts;
+    const auto  OUTER = getOverviewChromeRounding(monitor, CUTS.mid);
     SStripStyle style;
-    style.round = CARDROUND.rounding;
-    style.power = CARDROUND.power;
-    style.fade  = FADE;
+    style.round      = OUTER.rounding;
+    style.power      = OUTER.power;
+    style.innerRound = getOverviewChromeRounding(monitor, CUTS.token).rounding;
+    style.fade       = FADE;
     updateRestingFade();
-    // ponytail: the inner radius is the reference's verysmall:large ratio
-    // (8:23) applied to whatever the outer radius resolves to, rather than a
-    // literal 8. E8-c pinned the outer radius to the live desktop curve, so a
-    // hardcoded inner would stop tracking the theme the moment that changes.
-    style.innerRound = std::max(0, sc<int>(std::round(sc<float>(style.round) * 8.F / 23.F)));
 
     renderStripPanel(monitor, renderScale, style);
 

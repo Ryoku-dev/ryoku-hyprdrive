@@ -1,14 +1,8 @@
-// The live side's pure parts: the dock's stored ids compared and toggled as
-// AppIdentity keys (StoreIds.hpp + canonicalKey) on copies of today's store
-// files (tests/fixtures/identity/stores/: favourites, empty-desktop-apps,
-// fullscreen-apps as the dock writes them, with a Steam shortcut's desktop
-// id in them), and ProcFacts' bounded /proc reads on a fake /proc tree (the
+// The live side's pure parts: ProcFacts' bounded /proc reads on a fake /proc tree (the
 // parent chain, the allow-listed environment, the Wine relaunch settings, a
 // container's exe through /proc/<pid>/root, an unreadable environ).
 #include "AppIdentity.hpp"
-#include "DockMenuModel.hpp"
 #include "ProcFacts.hpp"
-#include "StoreIds.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -28,10 +22,6 @@ static int s_checks = 0, s_failed = 0;
     } while (0)
 
 namespace {
-    std::vector<std::string> readIds(const std::string& name) {
-        std::ifstream in("tests/fixtures/identity/stores/" + name);
-        return Hyprdrive::Dock::MenuModel::parseIdLines(in);
-    }
     void put(const fs::path& p, const std::string& bytes) {
         fs::create_directories(p.parent_path());
         std::ofstream(p, std::ios::binary) << bytes;
@@ -45,55 +35,6 @@ namespace {
 }
 
 int main() {
-    // ---- stored ids ----------------------------------------------------------------------
-    {
-        // The inventory: Steam's desktop shortcut "Overwatch" launches 2357570.
-        const std::vector<InventoryEntry> INV{{.id = "Overwatch", .name = "Overwatch", .exec = "steam steam://rungameid/2357570"},
-                                              {.id = "net.lutris.battlenet-12", .name = "Battle.net", .exec = "env LUTRIS_SKIP_INIT=1 lutris lutris:rungameid/12"},
-                                              {.id = "org.gnome.Nautilus", .name = "Files"}};
-        const InventoryView     VIEW{.entries = INV};
-        const StoreIds::Canon   CANON = [&](std::string_view s) { return canonicalKey(s, VIEW); };
-
-        const auto FAV = readIds("favorites");
-        CHECK(FAV.size() == 7 && FAV.back() == "Overwatch");
-        // The running game's group key and identity key both find the stored shortcut id.
-        CHECK(StoreIds::contains(FAV, "hd:steam-app-2357570", CANON));
-        CHECK(StoreIds::contains(FAV, "steam-app-2357570", CANON));
-        CHECK(sameApp("Overwatch", "steam-app-2357570", VIEW) && !sameApp("Overwatch", "steam-app-1", VIEW));
-        // Ordinary ids: unchanged, equal only to themselves.
-        CHECK(StoreIds::contains(FAV, "org.gnome.Nautilus", CANON) && !StoreIds::contains(FAV, "org.gnome.Nautilus2", CANON));
-        CHECK(canonicalKey("net.lutris.battlenet-12", VIEW) == "net.lutris.battlenet-12" && canonicalKey("hyprdrive-wine-wow.exe", VIEW) == "hyprdrive-wine-wow.exe");
-        // Nothing rewritten by reading: the file's bytes round-trip.
-        CHECK(Hyprdrive::Dock::MenuModel::serializeIds(FAV) == [] {
-            std::ifstream in("tests/fixtures/identity/stores/favorites");
-            return std::string(std::istreambuf_iterator<char>(in), {});
-        }());
-
-        // "Always open in an empty desktop", saved as "Overwatch": the game holds it.
-        const auto EMPTY = readIds("empty-desktop-apps");
-        CHECK(StoreIds::contains(EMPTY, "hd:steam-app-2357570", CANON));
-        // Toggled off from the running game: the alias goes.
-        auto off = StoreIds::toggled(EMPTY, "hd:steam-app-2357570", CANON);
-        CHECK(off.empty());
-        // On again: written as the canonical key, once.
-        auto on = StoreIds::toggled(off, "Overwatch", CANON);
-        CHECK(on.size() == 1 && on[0] == "steam-app-2357570");
-        // A list that holds both spellings loses both on one toggle.
-        auto both = StoreIds::toggled({"Overwatch", "org.gnome.Nautilus", "steam-app-2357570"}, "steam-app-2357570", CANON);
-        CHECK(both.size() == 1 && both[0] == "org.gnome.Nautilus");
-        const auto FULL = readIds("fullscreen-apps");
-        CHECK(StoreIds::contains(FULL, "hd:net.lutris.battlenet-12", CANON) && !StoreIds::contains(FULL, "Overwatch", CANON));
-        // The favourites toggle keeps the order of the others.
-        auto fav = StoreIds::toggled(FAV, "hd:steam-app-2357570", CANON);
-        CHECK(fav.size() == 6 && fav[0] == "app.zen_browser.zen" && fav[5] == "net.lutris.battlenet-12");
-        CHECK(StoreIds::erase(fav, "", CANON) == 0 && !StoreIds::same("", "", CANON));
-        // wine-apps.tsv v1: four columns, the key is hyprdrive-wine-<column 1>.
-        std::ifstream tsv("tests/fixtures/identity/stores/wine-apps.tsv");
-        std::string   line;
-        std::getline(tsv, line);
-        CHECK(std::ranges::count(line, '\t') == 3 && line.starts_with("wow.exe\t"));
-    }
-
     // ---- /proc ---------------------------------------------------------------------------
     {
         char tmpl[] = "/tmp/identity_live_test.XXXXXX";

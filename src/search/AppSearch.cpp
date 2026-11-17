@@ -1,6 +1,5 @@
 #include "AppSearch.hpp"
 #include "Workers.hpp"
-#include "Integration.hpp"
 #include "Launch.hpp"
 #include "IconScore.hpp"
 #include "SteamLibrary.hpp"
@@ -691,21 +690,16 @@ namespace AppSearch {
             return args;
         }
 
-        // Chromium --app=URL (Omarchy's omarchy-launch-webapp execs that) sets
-        // the Wayland app_id to chrome-{host}_{path}-Default, with '/' in the
-        // path turned into '_'. Omarchy webapp .desktop files have no
-        // StartupWMClass, so the dock would otherwise see a running window and
-        // no Icon=.
+        // Chromium --app=URL sets the Wayland app_id to
+        // chrome-{host}_{path}-Default, with '/' in the path turned into '_'.
+        // Web-app .desktop files often have no StartupWMClass, so a running
+        // window would otherwise match no entry and get no Icon=.
         std::string chromeAppClassStem(const std::string& exec) {
             std::string url;
             const auto  ARGS = splitArgs(stripFieldCodes(exec));
             for (size_t i = 0; i < ARGS.size(); ++i) {
                 if (ARGS[i].starts_with("--app=")) {
                     url = ARGS[i].substr(6);
-                    break;
-                }
-                if (ARGS[i] == "omarchy-launch-webapp" && i + 1 < ARGS.size()) {
-                    url = ARGS[i + 1];
                     break;
                 }
             }
@@ -988,28 +982,6 @@ namespace AppSearch {
     std::unordered_map<std::string, std::unordered_map<std::string, SIconCandidate>> g_altIndex; // theme -> index
     std::string                                                             g_altBuilding;       // theme on the worker
     Hyprdrive::Workers::Worker                                              g_altWorker;
-
-    std::string omarchyIconTheme() {
-        static std::string                           cached;
-        static std::chrono::steady_clock::time_point at{};
-        const auto                                   NOW = std::chrono::steady_clock::now();
-        if (at != std::chrono::steady_clock::time_point{} && NOW - at < std::chrono::seconds(2))
-            return cached;
-        at               = NOW;
-        const char* HOME = std::getenv("HOME");
-        std::string name;
-        // Omarchy's icons only ON Omarchy (Integration.hpp, audit A16): a box
-        // that once ran it keeps the state file, and fedora's hyprtest has one
-        // with no Omarchy at all. Empty = the caller's GTK theme, which is what
-        // dock:stack_icon_theme = auto means off Omarchy.
-        if (HOME && *HOME && Hyprdrive::Integration::omarchy()) {
-            std::ifstream f(std::string{HOME} + "/.local/state/omarchy/current/theme/icons.theme");
-            std::getline(f, name);
-            name = trim(name);
-        }
-        cached = name;
-        return cached;
-    }
 
     std::string resolveIconPathInTheme(const std::string& iconName, const std::string& theme) {
         if (iconName.empty() || iconName.starts_with('/') || theme.empty() || theme == iconThemeName())

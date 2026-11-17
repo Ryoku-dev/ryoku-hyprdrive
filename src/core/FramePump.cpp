@@ -1,5 +1,4 @@
-// The frame pump and the foreign frame sources (FramePump.hpp says what each
-// is for and where to add one). Moved out of the dock, unchanged.
+// The frame pump and its sources (FramePump.hpp says what each is for).
 
 #include "FramePump.hpp"
 #include "MotionClock.hpp"
@@ -13,9 +12,6 @@
 #include <unordered_map>
 
 #include "BorderFade.hpp"
-#include "CpuPulse.hpp"
-#include "DockStacks.hpp"
-#include "FlightController.hpp"
 #include "Mosaic.hpp"
 #include "Ripple.hpp"
 #include "WindowPill.hpp"
@@ -25,8 +21,7 @@ namespace {
 // ONE OUTSTANDING FRAME REQUEST PER MONITOR, and what it has to damage.
 //
 // The region is accumulated rather than taken from the first caller: within one
-// event-loop iteration the dock's own animation and a live preview on another
-// output can both ask, and a request that kept only the first box would leave
+// event-loop iteration two animations on one output can both ask, and a request that kept only the first box would leave
 // the second one's pixels stale. `full` wins over any box, which is what a
 // caller that cannot describe its damage asks for.
 struct SPumpRequest {
@@ -66,63 +61,33 @@ struct SPumpReaper {
 };
 SPumpReaper g_pumpReaper;
 
-// THE FOREIGN FRAME SOURCES, in the order Dock::needsFramesReason asks them.
-// The dock's own terms (autohide, menu, press, tilt, tooltip, ghost flight,
-// arrangement, hover panel, bounce, spring, launch zoom) stay in that function;
-// this is every term that belongs to another module. A new one is one line
-// here, in the slot whose neighbours it should be asked between -- order within
-// a slot is the order asked, and the first true one names the reason.
+// EVERY ANIMATION THAT RUNS ON A DESKTOP NOTHING ELSE REPAINTS: a fade, a
+// spring settling, a ring. Asked at every render.pre (main.cpp); the first one
+// that is live names the reason `hyprdrive:debug frames` prints, and the next
+// frame is booked. A new one is one line here.
 constexpr std::array SOURCES{
-    // V2. The SUPER-hold pill eases in and out over windows on a desktop where
-    // nothing else is repainting, exactly like the dock's own terms. It is
-    // asked from the dock's chain rather than pumped from its own module for
-    // the reason that chain exists at all: one list, in one place, so a new
-    // animation cannot join two of the three pumps and be forgotten by the
-    // third.
-    SSource{"window-pill", [](const PHLMONITOR&) { return WindowPill::animating(); }, ESlot::AFTER_TOOLTIP},
-
-    // The titles Super shows over windows (Mosaic::renderZoomLabels) fade on
-    // the tooltip's clock, over a pointer that may have stopped.
-    SSource{"super-labels", [](const PHLMONITOR&) { return Mosaic::labelsAnimating(); }, ESlot::AFTER_TOOLTIP},
-
-    // V11 V4. The stack popup's entrance, its drag ghost, and the hop or the
-    // shake that acknowledges a move. Asked from the dock's chain rather than
-    // pumped from its own module for the reason stated there: ONE list.
-    // NOT PURE: Stacks::animating() retires finished hops and shakes.
-    SSource{"stacks", [](const PHLMONITOR& monitor) { return Stacks::needsFrames(monitor->m_id); }, ESlot::AFTER_GHOST_FLIGHT},
-
-    SSource{"flight", [](const PHLMONITOR& monitor) { return Flight::anyOn(monitor); }, ESlot::AFTER_ARRANGE},
-    // A snapping clock holds the pulse still (CpuPulse::pulseFor): nothing to
-    // pump; the sampler damages when the busy set changes.
-    SSource{"cpu-pulse", [](const PHLMONITOR&) { return CpuPulse::anyBusy() && Motion::Clock::enabled(); }, ESlot::AFTER_ARRANGE},
-
-    // The pill's and the preview rings' border fade (BorderFade.hpp): a
-    // pointer resting on the pill emits no motion to repaint it.
-    SSource{"border-fade", [](const PHLMONITOR& monitor) { return BorderFade::animatingOn(monitor); }, ESlot::AFTER_ARRANGE},
-
-    // The hot corner's ripple (Ripple.hpp): the whole output again every frame
-    // while a ring is live, and once more to draw it clean. It used to damage
-    // from RENDER_LAST_MOMENT, inside the pass. (Inside an overview the
-    // overview's pacer asks for it as well.)
-    SSource{"ripple", [](const PHLMONITOR& monitor) { return Ripple::activeOn(monitor); }, ESlot::AFTER_ARRANGE},
+    // The SUPER-hold pill over the hovered tile eases in and out.
+    SSource{"window-pill", [](const PHLMONITOR&) { return WindowPill::animating(); }},
+    // The titles Super shows over windows (Mosaic::renderZoomLabels) fade over
+    // a pointer that may have stopped.
+    SSource{"super-labels", [](const PHLMONITOR&) { return Mosaic::labelsAnimating(); }},
+    // The pill's and the tile rings' border fade (BorderFade.hpp).
+    SSource{"border-fade", [](const PHLMONITOR& monitor) { return BorderFade::animatingOn(monitor); }},
+    // The hot corner's ripple (Ripple.hpp): the whole output every frame while
+    // a ring is live, and once more to draw it clean.
+    SSource{"ripple", [](const PHLMONITOR& monitor) { return Ripple::activeOn(monitor); }},
 };
 }
 
-// ASK FOR ANOTHER FRAME. Every animation the dock owns runs on a desktop where
-// nothing else is moving, so nothing else damages the monitor -- and a damage
+// ASK FOR ANOTHER FRAME. These animations run on a desktop where nothing else
+// is moving, so nothing else damages the monitor -- and a damage
 // requested from INSIDE the render pass is cleared with that pass, so it has to
 // be posted for after it. doLater is that, and it both starts and sustains the
 // loop.
 //
-// ONE REQUEST PER FRAME, and that is not tidiness either. damageIfChanged runs
-// on every pointer MOTION event, and motion events arrive far faster than
-// frames do -- so a predicate that is true while the pointer merely rests on a
-// dock icon (the hover panel is up, a bounce is running) posts a doLater per
-// motion, each of which damages the monitor, each of which causes a frame,
-// whose render.pre calls damageIfChanged again. Measured 2026-08-14: without
-// this guard zflight goes from 8/8 green to z4/z4c/z5/z6 red with the dock
-// missing clicks outright (zrig/danglingC2/zflight-pump-flood.log). The
-// collapse is exact rather than approximate: two damageMonitor calls in one
+// ONE REQUEST PER FRAME: callers can ask far faster than frames happen, and a
+// doLater per ask would damage the monitor per ask, each damage a frame whose
+// render.pre asks again -- a flood. The collapse is exact rather than approximate: two damageMonitor calls in one
 // event-loop iteration are the same region twice, so dropping the second
 // changes nothing but the flood.
 //
@@ -180,8 +145,8 @@ void request(PHLMONITOR monitor, std::optional<CBox> regionRenderPx) {
                 return;
             }
 
-            // damageBox wants GLOBAL LOGICAL coordinates and everything the dock
-            // holds is monitor-local render px: divide out the scale, add the
+            // damageBox wants GLOBAL LOGICAL coordinates and every caller holds
+            // monitor-local render px: divide out the scale, add the
             // output's position. Rounded OUTWARD, because a box that lands half
             // a pixel inside its own damage leaves a stale row.
             const double SCALE = std::max(MON->m_scale, 0.01F);
@@ -202,9 +167,11 @@ void forget(MONITORID id) {
     }
 }
 
-const char* foreignReason(const PHLMONITOR& monitor, ESlot slot) {
+const char* reason(const PHLMONITOR& monitor) {
+    if (!monitor)
+        return nullptr;
     for (const auto& SOURCE : SOURCES) {
-        if (SOURCE.slot == slot && SOURCE.active(monitor))
+        if (SOURCE.active(monitor))
             return SOURCE.name;
     }
     return nullptr;

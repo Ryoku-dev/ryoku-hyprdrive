@@ -28,13 +28,30 @@
 #include "OverviewParts.hpp"
 #include "Rows.hpp"
 #include "MotionClock.hpp"
-#include "DockParts.hpp"
 #include "StripCleanupModel.hpp"
 #include "FullscreenDesktop.hpp"
 #include "DesktopOrder.hpp"
 #include "DesktopStrip.hpp"
 
 #include <hyprland/src/desktop/state/WindowState.hpp>
+
+namespace {
+    // The plaque's metrics, in logical px, and the hover ease (Lithic's hover
+    // in, 160 ms, on smoothstep).
+    constexpr float PLAQUE_FONT  = 13.F;
+    constexpr float PLAQUE_PAD_X = 14.F;
+    constexpr float PLAQUE_PAD_Y = 7.F;
+    constexpr float PLAQUE_EDGE  = 8.F;
+    constexpr float HOVER_MS     = 160.F;
+
+    float hoverEased(const Hyprdrive::Motion::STween<Time::steady_tp>& fade) {
+        return Hyprdrive::Motion::smoothstep(std::clamp(Hyprdrive::Motion::Clock::animMs(fade.start) / HOVER_MS, 0.F, 1.F));
+    }
+
+    bool drawableBox(const CBox& b) {
+        return std::isfinite(b.x) && std::isfinite(b.y) && std::isfinite(b.width) && std::isfinite(b.height) && b.width >= 2.0 && b.height >= 2.0;
+    }
+}
 
 using namespace OverviewDetail;
 namespace SC = Hyprdrive::StripCleanup;
@@ -153,7 +170,6 @@ void COverview::renderStripCleanupGhosts(PHLMONITOR monitor, float renderScale, 
 void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float fade) {
     if (!monitor)
         return;
-    namespace D = Hyprdrive::Dock;
     auto&      S    = stripClean;
     const auto NOW  = Time::steadyNow();
     const bool WANT = S.wantNow;
@@ -170,7 +186,7 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         S.box     = {};
         S.placed  = false;
         S.pressed = false;
-        S.lit.moveTo(Hyprdrive::Motion::SLitSet<Time::steady_tp>::NONE, NOW, D::menuHoverEased);
+        S.lit.moveTo(Hyprdrive::Motion::SLitSet<Time::steady_tp>::NONE, NOW, hoverEased);
         return;
     }
 
@@ -178,9 +194,9 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
     if (PLATE.empty())
         return;
 
-    // THE DOCK MENU'S ROW, measured as DockMenu.cpp measures one.
+    // A quiet plaque: one row, Geologica at the menu size.
     const float      SCALE  = std::max(monitor->m_scale, 0.01F);
-    const int        FONTPX = std::max(1, sc<int>(std::round(D::MENU_FONT * SCALE)));
+    const int        FONTPX = std::max(1, sc<int>(std::round(PLAQUE_FONT * SCALE)));
     const bool       LIGHT  = Hyprdrive::Config::isLightTheme();
     const auto       INK    = Hyprdrive::Config::themeForeground();
     const CHyprColor LABEL_COLOR{INK.r, INK.g, INK.b, 0.95F};
@@ -191,16 +207,16 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         return;
     const float GLYPHCOLW = std::round(sc<float>(FONTPX) * 1.9F);
     const float LW = sc<float>(LABEL->m_size.x), LH = sc<float>(LABEL->m_size.y);
-    const float ROWH = std::round(LH + 2.F * D::MENU_ROW_PAD_Y * SCALE);
+    const float ROWH = std::round(LH + 2.F * PLAQUE_PAD_Y * SCALE);
     // The menu's side padding both ways, the glyph column, the label, and the
     // few px a hovered row's content lifts to the right.
-    const float W   = std::round(2.F * D::MENU_PAD_X * SCALE + GLYPHCOLW + LW + 4.F * SCALE);
+    const float W   = std::round(2.F * PLAQUE_PAD_X * SCALE + GLYPHCOLW + LW + 4.F * SCALE);
     const float GAP = OverviewRender::LABEL_PILL_GAP * SCALE; // the strip label's gap to the plate
     const float Y   = std::round(sc<float>(PLATE.y + PLATE.height) + GAP);
 
     // ACROSS: after the pointer while it is on the strip (held while it is on
     // the button, so the button never runs from it), on the strip cells' glide.
-    const float EDGE = std::round(D::MENU_EDGE_MARGIN * SCALE);
+    const float EDGE = std::round(PLAQUE_EDGE * SCALE);
     const float LO   = std::max(sc<float>(PLATE.x), EDGE);
     const float HI   = std::min(sc<float>(PLATE.x + PLATE.width), sc<float>(monitor->m_size.x * SCALE) - EDGE);
     const bool  ONMON = isOverviewPointerOnMonitor(monitor);
@@ -249,8 +265,8 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
 
     // Hover and press, the menu's own ease.
     const bool HOT = WANT && ONBTN && RAW > 0.5F;
-    S.lit.moveTo(HOT ? 1 : Hyprdrive::Motion::SLitSet<Time::steady_tp>::NONE, NOW, D::menuHoverEased);
-    const float LIT     = S.lit.level(1, D::menuHoverEased);
+    S.lit.moveTo(HOT ? 1 : Hyprdrive::Motion::SLitSet<Time::steady_tp>::NONE, NOW, hoverEased);
+    const float LIT     = S.lit.level(1, hoverEased);
     const bool  PRESSED = S.pressed && HOT;
     if (PRESSED) {
         // A press sinks it a hair, about its centre.
@@ -258,22 +274,33 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         box            = CBox{box.x + box.width * (1 - K) / 2, box.y + box.height * (1 - K) / 2, box.width * K, box.height * K}.round();
     }
 
-    const int RADIUS = sc<int>(std::round(std::min<double>(D::MENU_RADIUS * SCALE, box.height / 2.0)));
-    D::frostedPlate(monitor, box, RADIUS, A);
-
-    if (const float FILL = (PRESSED ? 0.40F : 0.26F) * LIT; FILL > 0.003F) {
+    // The overlay plane, cut small, and the row washes of the Hub's tree:
+    // fg at 0.06 / 0.07 hovered, 0.10 / 0.12 pressed (docs/lithic/design.md).
+    const float POWER  = Hyprdrive::Config::chromeCornerPower();
+    const int   RADIUS = sc<int>(std::round(std::min<double>(Hyprdrive::Config::chromeCorner(Hyprdrive::Look::current().cuts.small, box.width, box.height) * SCALE,
+                                                             box.height / 2.0)));
+    {
         CRectPassElement::SRectData f;
         f.box           = box;
-        f.color         = Hyprdrive::Config::highlightColor().modifyA(FILL * A);
+        f.color         = Hyprdrive::Config::chromeOverlay().modifyA(A);
         f.round         = RADIUS;
-        f.roundingPower = 2.F;
-        if (Hyprdrive::Stacks::drawableBox(f.box))
+        f.roundingPower = POWER;
+        if (drawableBox(f.box))
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(f));
+    }
+    if (const float WASH = (PRESSED ? (LIGHT ? 0.12F : 0.10F) : (LIGHT ? 0.07F : 0.06F)) * LIT; WASH > 0.003F) {
+        CRectPassElement::SRectData f;
+        f.box           = box;
+        f.color         = Hyprdrive::Config::themeForeground().modifyA(WASH * A);
+        f.round         = RADIUS;
+        f.roundingPower = POWER;
+        if (drawableBox(f.box))
             g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(f));
     }
 
     // The row's content: glyph column, then the label; lifted on hover.
     const float GROW  = 1.F + 0.035F * LIT;
-    const float TEXTX = std::round(sc<float>(box.x) + D::MENU_PAD_X * SCALE + 4.F * SCALE * LIT);
+    const float TEXTX = std::round(sc<float>(box.x) + PLAQUE_PAD_X * SCALE + 4.F * SCALE * LIT);
     const float TEXTY = std::round(sc<float>(box.y) + (sc<float>(box.height) - LH) / 2.F);
     if (GLYPH && GLYPH->ok()) {
         CTexPassElement::SRenderData g;
@@ -293,16 +320,16 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
             g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(t));
     }
 
-    // The menu's outline: the theme accent at Hyprland's border weight.
+    // Its hairline.
     {
         CBorderPassElement::SBorderData b;
         b.box = box;
-        b.grad1.reset(Hyprdrive::Config::highlightColor().modifyA(1.F));
+        b.grad1.reset(Hyprdrive::Config::restingBorderColor());
         b.a             = A;
-        b.borderSize    = std::max(1, Hyprdrive::Config::getValue<int>("general:border_size"));
+        b.borderSize    = 1;
         b.round         = RADIUS;
-        b.roundingPower = 2.F;
-        if (Hyprdrive::Stacks::drawableBox(b.box) && b.a > 0.001F)
+        b.roundingPower = POWER;
+        if (drawableBox(b.box) && b.a > 0.001F)
             g_pHyprRenderer->context().m_pass.add(makeUnique<CBorderPassElement>(b));
     }
 }
@@ -316,7 +343,7 @@ bool COverview::stripCleanupAnimating() const {
         return true;
     if (!S.out() && msSince(S.onAt) < SC::GRACE_MS + 16.0)
         return true; // the grace runs out with nothing moving
-    return S.lit.anyRunning([](const Hyprdrive::Motion::STween<Time::steady_tp>& f) { return Hyprdrive::Dock::elapsedMs(f.start) < Hyprdrive::Dock::MENU_HOVER_MS + 20.F; });
+    return S.lit.anyRunning([](const Hyprdrive::Motion::STween<Time::steady_tp>& f) { return Hyprdrive::Motion::Clock::animMs(f.start) < HOVER_MS + 20.F; });
 }
 
 bool COverview::stripCleanupButton(bool pressed) {
@@ -391,7 +418,7 @@ std::string COverview::stripCleanupReport() const {
     return std::format("stripclean: want={} alpha={:.2f} box={:.0f},{:.0f} {:.0f}x{:.0f} plate={:.0f},{:.0f} {:.0f}x{:.0f} x={:.1f} removable={} bumpL={:.1f} "
                        "gridNudge={:.1f} pressed={} lit={:.2f} ghosts={} images={}",
                        S.wantNow ? 1 : 0, S.alpha(), S.box.x, S.box.y, S.box.width, S.box.height, S.plate.x, S.plate.y, S.plate.width, S.plate.height, S.x,
-                       stripRemovableEmpties(), S.bumpL, gridNudge ? gridNudge->value() : 0.F, S.pressed ? 1 : 0, S.lit.level(1, Hyprdrive::Dock::menuHoverEased),
+                       stripRemovableEmpties(), S.bumpL, gridNudge ? gridNudge->value() : 0.F, S.pressed ? 1 : 0, S.lit.level(1, hoverEased),
                        S.reflow ? S.ghosts.size() : 0, images.size());
 }
 

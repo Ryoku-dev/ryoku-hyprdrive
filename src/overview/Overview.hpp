@@ -462,7 +462,6 @@ class COverview : public IOverview {
     void      gatherDropSite(SOverviewDropSite& site);
     void      gatherDropWorkspace(SOverviewDropSite& site);
     void      gatherDropAnchor(SOverviewDropSite& site);
-    void      commitDropMinimize(const SOverviewDropSite& site);
     void      commitDropCancel(const SOverviewDropSite& site);
     void      commitDrop(const SOverviewDropSite& site, const Hyprdrive::Drop::SDecision& decision);
     float     dragMiniProgress() const;

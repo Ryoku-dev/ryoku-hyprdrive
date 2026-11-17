@@ -8,14 +8,13 @@ One compiled plugin (`hyprdrive.so`). Each folder is one subsystem; every
 | `core/` | plugin entry (`main.cpp`), the settings registry (`Config`), names kept for old configs (`Compat`), small shared helpers |
 | `overview/` | the overview: its window grid, cards, hit-testing, input, rendering and frame policy |
 | `search/` | type-to-search: the result sources (apps, windows, files, tools, GNOME providers), the session state and the letter animation |
-| `dock/` | the dock: items, layout and autohide, menu, input, live previews, minimize and scratchpad flights |
-| `stacks/` | dock folders: fan and grid stacks, the file reader, thumbnails, drives and Trash |
-| `apps/` | what an app is: desktop entries, icons, games and Wine windows |
+| `windows/` | what happens to a window outside a layout: the minimize stash, the scratchpad and its exit band, the edge springs |
+| `apps/` | what an app is: icons, games and Wine windows |
 | `layout/` | window management: Mosaic and its packer, own-size tiles, fullscreen desktops, show desktop |
 | `desktops/` | switching and reordering desktops, and the strip that shows them |
-| `motion/` | flights between two places, motion blur, the shared curves, border fades |
+| `motion/` | motion blur, the shared curves, border fades |
 | `input/` | trackpad gestures: raw fingers, swipe models, the gesture driver |
-| `platform/` | what differs between a plain Hyprland desktop and Omarchy: detection, theme sources, fonts, the settings app |
+| `platform/` | the desktop around the plugin: its Lithic look (Look, through the ryoku-hyprdrive-look bridge), fonts, glyphs, the hyprctl answers Ryoku Settings reads |
 | `debug/` | the `hyprdrive:debug` instruments: profiler, synthetic gestures, log paths |
 
 A header that ends in `Model`, `Math`, `Layout`, `Plan` or `Decision` is pure
@@ -37,10 +36,12 @@ that is kept loaded (Workers.hpp has the whole policy).
 
 **A new animation that needs frames.** Anything that moves with no pointer
 motion and no client commit left to repaint it (a fade, a spring settling, a
-flight) has to say so, or the desktop stops drawing mid-way. A module outside
-`dock/` adds one line to the `SOURCES` table in `core/FramePump.cpp`: the reason
-name `hyprdrive:debug frames` prints, its predicate, and the slot in
-`Dock::needsFramesReason`'s chain it is asked at. The dock's own terms stay in
-that function. Nothing asks for a frame by damaging from inside the render pass:
-`FramePump::request` (the dock's `pumpFrame`) posts it for after the pass and
+ring) has to say so, or the desktop stops drawing mid-way: one line in the
+`SOURCES` table in `core/FramePump.cpp`, the reason name `hyprdrive:debug
+frames` prints and its predicate. Nothing asks for a frame by damaging from
+inside the render pass: `FramePump::request` posts it for after the pass and
 coalesces it to one per output per event-loop iteration.
+
+**A new colour or corner.** Every colour is a Lithic role and every chrome
+corner a Lithic cut, through `core/Theme.cpp` and `platform/Look.hpp`; nothing
+names a colour value or a radius of its own (docs/lithic/styles.md).

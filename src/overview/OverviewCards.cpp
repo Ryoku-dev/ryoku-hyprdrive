@@ -130,8 +130,8 @@ void COverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, siz
     const float DEPTH           = cardDepth(workspaceIdx);
     const CBox  CARDBOX         = depthScaled(WORKSPACEBOX, WORKSPACEBOX.middle(), DEPTH); // the clip: the card as drawn
 
-    // B2: a promoted tile is drawn here, in its own workspace's pass — that is
-    // where the m_visible / m_forceRendering override below lives — but at the
+    // B2: a promoted tile is drawn here, in its own workspace's pass -- that is
+    // where the m_visible / m_forceRendering override below lives -- but at the
     // active card's offset. So an off-screen workspace still has to be walked.
     const auto ACTIVECARDBOX = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), 0.F, layout);
     const bool HASPROMOTED   = !WORKSPACEVISIBLE && std::ranges::any_of(workspaceImage->windows, [&](const auto& ref) {
@@ -408,8 +408,6 @@ static float closingTileDurationMs() {
 // not Omarchy's) the live windowsOut style: `popin N%` shrinks to N%; any other
 // style (fade, slide, gnomed...) fades in place.
 static float closingTilePopin() {
-    if (Hyprdrive::Integration::omarchy())
-        return 0.87F;
     const auto CONFIG = Config::animationTree()->getAnimationPropertyConfig("windowsOut");
     const auto VALUES = CONFIG && CONFIG->pValues ? CONFIG->pValues.lock() : CONFIG;
     if (!VALUES)

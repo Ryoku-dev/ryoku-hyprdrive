@@ -10,7 +10,6 @@
 #include "SearchBackend.hpp"
 #include "SearchProviders.hpp"
 #include "Scratchpad.hpp"
-#include "DockStacks.hpp"
 #include "OverviewGestureDecision.hpp"
 #include <format>
 
@@ -501,7 +500,7 @@ void notePadFingers(uint32_t n) {
 }
 
 // Hold/swipe end. A physical click cancels the hold, then the button event
-// arrives — keep the last count but restart the clock from the cancel, not
+// arrives -- keep the last count but restart the clock from the cancel, not
 // from when the fingers first landed (rest-then-click is seconds, not 160ms).
 void notePadFingersEnd(bool keepLast) {
     g_padFingers = 0;

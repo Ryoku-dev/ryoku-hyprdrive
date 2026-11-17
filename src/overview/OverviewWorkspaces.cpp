@@ -287,6 +287,11 @@ void COverview::rebuildWorkspaceImages() {
 
     images.clear();
 
+    // The strip is one Ryoku desktop: the monitor's row. Another desktop's
+    // workspaces on this monitor are left out (Super+Alt+Tab is how you get
+    // there), all but the one shown, so the view never loses its own.
+    const Hyprdrive::Row ROW   = Hyprdrive::Rows::of(pMonitor.lock());
+    const auto           SHOWN = pMonitor.lock() ? pMonitor.lock()->m_activeWorkspace : PHLWORKSPACE{};
     for (const auto& w : State::workspaceState()->workspaces()) {
         const auto WORKSPACE = w.lock();
         if (!valid(WORKSPACE) || WORKSPACE->m_monitor != pMonitor || Hyprdrive::Compat::isSpecial(WORKSPACE))
@@ -295,12 +300,14 @@ void COverview::rebuildWorkspaceImages() {
         if (WORKSPACE == REMOVEDWORKSPACE)
             continue;
 
+        if (ROW.bounded() && !ROW.contains(Hyprdrive::Compat::id(WORKSPACE)) && WORKSPACE != SHOWN)
+            continue;
+
         images.emplace_back(makeShared<SWorkspaceImage>(WORKSPACE));
     }
 
-    // The row's desktops by place, then visitors (outside the row) by number,
-    // as Omarchy's bar lists its guests. (Blocks off: by number.)
-    const Hyprdrive::Row ROW = Hyprdrive::Rows::of(pMonitor.lock());
+    // The row's desktops by place, then the shown visitor if any. (Blocks off:
+    // by number.)
     std::sort(images.begin(), images.end(), [&ROW](const auto& a, const auto& b) {
         const WORKSPACEID A = Hyprdrive::Compat::id(a->pWorkspace), B = Hyprdrive::Compat::id(b->pWorkspace);
         const bool        INA = ROW.contains(A), INB = ROW.contains(B);

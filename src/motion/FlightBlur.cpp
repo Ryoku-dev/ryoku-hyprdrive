@@ -359,7 +359,7 @@ namespace Hyprdrive::FlightBlur {
     }
 
     int samples() {
-        return std::clamp(Config::getValue<int>("plugin:hyprdrive:dock:minimize_motion_blur"), 0, 32);
+        return std::clamp(Config::getValue<int>("plugin:hyprdrive:motion_blur:samples"), 0, 32);
     }
 
     bool drawBlurred(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& prevBox, const CBox& box, const std::function<void()>& draw, int samplesOverride) {
@@ -438,41 +438,6 @@ namespace Hyprdrive::FlightBlur {
         countDrawn(g_lastShaped);
         g_lastShaped = SITE_N;
         return true;
-    }
-
-    void recordDriven(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& prevBox, const CBox& box) {
-        if (!monitor || !window)
-            return;
-
-        const bool WANT = samples() >= 2 && valid(prevBox) && valid(box) && monitor->m_transform == WL_OUTPUT_TRANSFORM_NORMAL;
-        auto*      t    = transformerOf(window);
-        if (!WANT) {
-            if (t)
-                disarm(t);
-            return;
-        }
-        if (!t)
-            t = attach(window);
-
-        const float SCALE = monitor->m_scale;
-        t->m_prev         = logical(prevBox, SCALE);
-        t->m_cur          = logical(box, SCALE);
-        t->m_armed        = moved(prevBox, box);
-        t->m_samples      = samples();
-        t->m_maxSamples   = MotionSpacing::MAX_SAMPLES;
-        t->m_site         = sc<size_t>(ESite::MINIMIZE);
-        t->m_scale        = SCALE;
-        t->m_fedAt        = Time::steadyNow();
-
-        // The smear reaches back to where the window was: repaint that too.
-        CBox reach = t->m_prev.copy();
-        reach      = CBox{std::min(reach.x, t->m_cur.x), std::min(reach.y, t->m_cur.y), 0, 0};
-        reach.w    = std::max(t->m_prev.x + t->m_prev.w, t->m_cur.x + t->m_cur.w) - reach.x;
-        reach.h    = std::max(t->m_prev.y + t->m_prev.h, t->m_cur.y + t->m_cur.h) - reach.y;
-        if (t->m_armed)
-            damageTrail(t, reach.expand(MARGIN).translate(monitor->m_position));
-        else
-            disarm(t);
     }
 
     void sweep(const std::function<bool(const PHLWINDOW&)>& stillFlying) {

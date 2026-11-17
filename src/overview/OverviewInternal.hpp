@@ -25,6 +25,7 @@
 #include "ToolSearch.hpp"
 #include "SearchSession.hpp"
 #include "TileChrome.hpp"
+#include "Retiled.hpp"
 #include "WindowPill.hpp"
 
 namespace TileChrome = Hyprdrive::TileChrome;
@@ -101,10 +102,10 @@ namespace WindowPill = Hyprdrive::WindowPill;
 #undef protected
 #undef private
 #include "Config.hpp"
-#include "Dock.hpp"
 #include "DropIndicator.hpp"
 #include "OverviewPassElement.hpp"
 #include "Minimize.hpp"
+#include "Look.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
 #include "SearchProviders.hpp"
@@ -144,8 +145,9 @@ static_assert(sc<int>(Layout::CORNER_BOTTOMRIGHT) == sc<int>(OvGeom::CORNER_BOTT
 inline float overviewTopChromeBottomL(PHLMONITOR monitor);
 inline uint64_t overviewFrameOn(const PHLMONITOR& monitor);
 
-// Sit the scaled card in the band between the Omarchy top bar and the dock
-// so the padding above the card equals the padding below it. The shift fades
+// Sit the scaled card in the band between the top bar and whatever reserves
+// the bottom edge (a dock), so the padding above the card equals the padding
+// below it. The shift fades
 // with open progress: at scale 1 the desktop still fills the monitor.
 inline Vector2D overviewCardOriginOffsetLive(PHLMONITOR monitor, float overviewScale) {
     if (!monitor)
@@ -157,13 +159,7 @@ inline Vector2D overviewCardOriginOffsetLive(PHLMONITOR monitor, float overviewS
 
     const float TOP = std::max(0.F, (overviewTopChromeBottomL(monitor) - sc<float>(monitor->m_position.y)) * MS);
 
-    float bottom = H;
-    if (Hyprdrive::Dock::onMonitor(monitor)) {
-        const float ICON = sc<float>(std::clamp(Hyprdrive::Config::getValue<int>("plugin:hyprdrive:dock:icon_size"), 8, 512));
-        // Dock.cpp: ICON_PAD 14 on top and bottom, EDGE_MARGIN 4 under the pill.
-        const float DOCKH = ICON + 14.F + 14.F + 4.F;
-        bottom            = std::max(TOP + 1.F, H - DOCKH * MS);
-    }
+    const float bottom = std::max(TOP + 1.F, H - sc<float>(monitor->m_reservedArea.bottom()) * MS);
 
     if (bottom <= TOP + 1.F)
         return {};
@@ -324,7 +320,6 @@ inline bool isOverviewSubmapActive() {
 // overview is up, handed back only if the overview closes onto its owner.
 void releasePointerLocks();
 void cancelPointerHandoff(); // unload
-void traceHandback(const char* who, const PHLWINDOW& asked, const PHLWINDOW& target, const PHLWINDOW& before);
 extern PHLWINDOWREF g_focusAtOpen; // the focused window when the session opened
 void handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResource>& surface);
 
@@ -370,11 +365,9 @@ inline void restoreOverviewKeyboard(const PHLWINDOW& window, const char* who = "
     if (target->wlSurface())
         surf = target->wlSurface()->resource();
 
-    const auto BEFORE = Desktop::focusState()->window();
     Desktop::focusState()->fullWindowFocus(target, Desktop::FOCUS_REASON_SWITCH_TO_WINDOW_HARD, surf);
     if (g_pSeatManager && surf)
         g_pSeatManager->setKeyboardFocus(surf);
-    traceHandback(who, window, target, BEFORE);
     handPointerTo(target, surf);
 }
 
@@ -517,7 +510,7 @@ struct SSearchRow {
     std::string                  iconFont;
     const AppSearch::SEntry*     app = nullptr;
     SearchProviders::SResult     provider;
-    std::optional<SearchBackend::SSearchItem> omarchy;
+    std::optional<SearchBackend::SSearchItem> backend;
     int                          column = 0; // 0 = Left (Apps, Actions, Calc, Agents), 1 = Right (Files, Settings)
 
     // THE TOOL PANE (ToolSearch.hpp). Non-zero on every row of a `define` /
@@ -654,7 +647,7 @@ inline std::vector<SSearchRow> overviewToolRows(const ToolSearch::SQuery& TQ) {
         item.description   = S.tag;
         item.actionCommand = S.text;
         item.category      = KIND == 1 ? "Dictionary" : "Translate";
-        r.omarchy          = item;
+        r.backend          = item;
         rows.push_back(std::move(r));
     }
     return rows;
@@ -797,7 +790,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     return rows;
 }
 
-// X49. One card per column: Omarchy Menu / System (0), Files & Folders (1), AI & Tools (2).
+// X49. One card per column: System (0), Files & Folders (1), AI & Tools (2).
 struct SSearchSection {
     std::string         title;
     std::string         icon;
@@ -810,7 +803,7 @@ struct SSearchSection {
 inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSearchRow>& rows) {
     std::vector<SSearchSection> out;
     std::string menuTitle = SearchBackend::menuCurrentRouteTitle();
-    // "Omarchy Menu" on Omarchy, "System" on plain Hyprland (native port A6).
+    // "System" at the menu root, else the submenu's own title.
     out.push_back({menuTitle.empty() ? SearchBackend::menuRootTitle() : menuTitle, "system-run", {}, 0, false, 0});
     out.push_back({"Files & Folders", "folder", {}, 0, false, 1});
     out.push_back({"AI & Tools", "utilities-terminal", {}, 0, false, 2});
@@ -904,15 +897,15 @@ inline void overviewSettleMenuStep(const std::string& from = {}) {
     for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
         if (NEXT[sc<size_t>(i)].column != 0)
             continue;
-        if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == SearchBackend::EItemKind::Back)
+        if (NEXT[sc<size_t>(i)].backend && NEXT[sc<size_t>(i)].backend->kind == SearchBackend::EItemKind::Back)
             continue;
         sel = i;
         break;
     }
     if (!from.empty()) {
         for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
-            if (NEXT[sc<size_t>(i)].column == 0 && NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == SearchBackend::EItemKind::Menu &&
-                NEXT[sc<size_t>(i)].omarchy->id == from) {
+            if (NEXT[sc<size_t>(i)].column == 0 && NEXT[sc<size_t>(i)].backend && NEXT[sc<size_t>(i)].backend->kind == SearchBackend::EItemKind::Menu &&
+                NEXT[sc<size_t>(i)].backend->id == from) {
                 sel = i;
                 break;
             }
@@ -936,8 +929,8 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
 
     // A tool row that rewrites the query (AI & Tools "Define" / "Translate"):
     // the panel turns into the tool, and the overview stays up to show it.
-    if (ROW.omarchy && ROW.omarchy->kind == SearchBackend::EItemKind::Action && ROW.omarchy->actionCommand.starts_with(OVERVIEW_QUERY_REWRITE)) {
-        g_search.query.text             = ROW.omarchy->actionCommand.substr(OVERVIEW_QUERY_REWRITE.size());
+    if (ROW.backend && ROW.backend->kind == SearchBackend::EItemKind::Action && ROW.backend->actionCommand.starts_with(OVERVIEW_QUERY_REWRITE)) {
+        g_search.query.text             = ROW.backend->actionCommand.substr(OVERVIEW_QUERY_REWRITE.size());
         g_search.query.active           = true;
         g_search.nav.zone               = EOverviewNavZone::Search;
         g_search.nav.selection          = -1;
@@ -955,11 +948,11 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
     if (ROW.toolStatus)
         return false;
 
-    if (ROW.omarchy) {
-        if (ROW.omarchy->kind == SearchBackend::EItemKind::Menu || ROW.omarchy->kind == SearchBackend::EItemKind::Back) {
-            const bool DRILL = ROW.omarchy->kind == SearchBackend::EItemKind::Menu;
+    if (ROW.backend) {
+        if (ROW.backend->kind == SearchBackend::EItemKind::Menu || ROW.backend->kind == SearchBackend::EItemKind::Back) {
+            const bool DRILL = ROW.backend->kind == SearchBackend::EItemKind::Menu;
             const auto LEFT  = DRILL ? std::string{} : SearchBackend::menuCurrentRoute();
-            SearchBackend::activate(*ROW.omarchy);
+            SearchBackend::activate(*ROW.backend);
             if (DRILL && !g_search.query.text.empty()) {
                 // The drill clears the query the windows were filtered by, so
                 // the membership gate has to hear about it like any other edit:
@@ -973,7 +966,7 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
             overviewSettleMenuStep(LEFT);
             return false;
         }
-        return SearchBackend::activate(*ROW.omarchy);
+        return SearchBackend::activate(*ROW.backend);
     } else if (ROW.app) {
         if (!newInstance) {
             if (const auto W = overviewWindowForApp(*ROW.app)) {
@@ -1180,20 +1173,9 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
 // that already bump (query edit, session reset, minimize, restore, title,
 // class, moveToWorkspace), which is exactly the property a generation key needs.
 inline bool overviewMembershipMatchesLive(const PHLWINDOW& WINDOW) {
-    // Y9 REVISED (user, 2026-08-06): a minimized window belongs in the overview
-    // ONLY while a query is active. With an empty query it stays put away --
-    // which is what minimizing it meant -- and this is X58(a)'s original wording
-    // restored: "filtering needs to work even on minimized windows".
-    //
-    // The gate goes HERE and nowhere else on purpose. shouldShowOverviewWindow
-    // is the one thing every overview path consults (see the note on it), so
-    // putting the rule under it keeps render, hit-test, drag and grid from ever
-    // disagreeing about whether a stashed window exists. The workspace-home
-    // plumbing in overviewGridWindows and addOverviewWindow stays: it is what
-    // puts the window on the RIGHT desktop once a query does bring it back.
-    if (g_search.query.text.empty() && Hyprdrive::Minimize::isMinimized(WINDOW))
-        return false;
-
+    // A put-away window (a fullscreen game stepped aside, FullscreenGuard.hpp)
+    // has no dock to come back from on Ryoku: the overview shows it on its
+    // home desktop (overviewGridWindows), and picking it restores it.
     return overviewSearchMatches(WINDOW);
 }
 
@@ -1228,13 +1210,13 @@ inline bool overviewMembershipMatches(const PHLWINDOW& WINDOW) {
 // removes it from the grid too, and the survivors re-lay-out through the U4
 // reflow animation at no extra cost.
 // Omarchy's screensaver is a real fullscreen terminal (class
-// org.omarchy.screensaver). The overview owns the monitor's render pass, so
+// org.backend.screensaver). The overview owns the monitor's render pass, so
 // that window cannot cover the output while an overview is up. Drop the
 // overview immediately; do not wait for the close animation.
 inline bool isScreensaverWindow(const PHLWINDOW& window) {
     if (!window)
         return false;
-    return window->metadata().appID() == "org.omarchy.screensaver" || window->metadata().initialAppID() == "org.omarchy.screensaver";
+    return window->metadata().appID() == "org.backend.screensaver" || window->metadata().initialAppID() == "org.backend.screensaver";
 }
 
 inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {

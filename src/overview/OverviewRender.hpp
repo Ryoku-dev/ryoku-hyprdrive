@@ -13,18 +13,16 @@ void flushPass(PHLMONITOR monitor);
 // result cards) does not frost on a theme with no window blur.
 void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, int blurPasses = -1);
 
-// Search bar, result cards, and the workspace strip: the same plate the dock
-// wears (Omarchy terminal background, accent border, frost only if window blur
-// is on). Rounding is the caller's -- themeRounding for these surfaces, the
-// Dash-to-Dock 24 stays on the dock itself.
-// lit = the accent ring (hovered / keyboard on it); otherwise the resting tile border.
-// fadeKey (BorderFade::key) = fade between the two on Hyprland's `border`
-// animation, as a window's border does when it takes focus; 0 = snap.
-void themePlate(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, bool lit = true, uint64_t fadeKey = 0);
+// The overview's chrome plate -- the search pill and results, the strip, the
+// scratchpad band: the desktop's page plane with its hairline, no blur.
+// `rounding` / `roundingPower` come from getOverviewChromeRounding.
+// lit = the mark of place (the pointer or the keyboard on it); fadeKey
+// (BorderFade::key) fades between the two on Hyprland's `border` curve.
+void themePlate(const CBox& box, int rounding, float roundingPower, float alpha, bool lit = true, uint64_t fadeKey = 0);
 
 // X92. Stable dual-kawase of the overview main FB for strip/result chrome.
 // blurMainFramebuffer() returns a TEMPORARY texture that window live-blurs
-// overwrite in the same frame — storing only that pointer made the strip frost
+// overwrite in the same frame -- storing only that pointer made the strip frost
 // depend on whether tiles ran. captureFrameChromeBlur copies into a private FB.
 void                 captureFrameChromeBlur(PHLMONITOR monitor);
 SP<Render::ITexture> frameChromeBlur();

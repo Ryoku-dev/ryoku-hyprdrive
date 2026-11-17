@@ -68,12 +68,7 @@ namespace Hyprdrive::DesktopPlan {
     // -- the hard guarantee that Hyprdrive only ever picks numbers in a
     // monitor's own block (Row.hpp). The implicit row is every number from 1,
     // so natively this adds nothing.
-    //
-    // An Omarchy GUEST (a desktop with a merged record) is an ordinary member:
-    // nothing here refuses it (user, 2026-11-11: pinning them blocked every
-    // trip, payback, reorder and compaction of the row they sat in). Its
-    // record is Omarchy's to drop, and Hyprdrive has Omarchy drop it whenever
-    // it renumbers one (Rows::adopt).
+
     inline Verdict check(const std::vector<Desk>& desks, const std::vector<Move>& moves) {
         std::unordered_map<Key, Id>          final;
         std::unordered_map<Key, const Desk*> desk;
@@ -104,8 +99,8 @@ namespace Hyprdrive::DesktopPlan {
     }
 
     // A member of `row`: a desktop on a monitor with that row whose number is
-    // in it. (A desktop outside its monitor's row is a VISITOR -- an Omarchy
-    // guest, a legacy number -- never renumbered, never counted.)
+    // in it. (A desktop outside its monitor's row is a VISITOR, such as one of
+    // another Ryoku desktop moved to this monitor: never renumbered, never counted.)
     inline bool member(const Desk& d, const Row& row) {
         return sameRow(d.row, row) && row.contains(d.id);
     }
@@ -167,9 +162,7 @@ namespace Hyprdrive::DesktopPlan {
     // PER ROW (DesktopOrder::compact runs it once per row): `desks` are the
     // row's members, numbered from its first place; overflow desktops are
     // ordinary members, so they come into the block as soon as it has room
-    // -- in order, where Omarchy's append_slot would put them. Omarchy's
-    // guests are members like any other: the row ends contiguous from its
-    // first place, always.
+    // -- in order. The row ends contiguous from its first place, always.
     struct Room {
         Key  key       = 0;
         Id   id        = 0;

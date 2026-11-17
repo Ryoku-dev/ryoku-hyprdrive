@@ -99,11 +99,6 @@ namespace AppSearch {
     // The same, in another icon theme (its own index, built on a worker the
     // first time; answers from the main theme until then).
     std::string resolveIconPathInTheme(const std::string& iconName, const std::string& theme);
-    // The icon theme the current Omarchy theme names
-    // (~/.local/state/omarchy/current/theme/icons.theme), re-read at most every
-    // 2 s so a theme switch is picked up; "" when there is none.
-    std::string omarchyIconTheme();
-
     // Detached, so the app outlives the overview closing.
     // terminalCmd is used only for Terminal=true entries; empty falls back to
     // $TERMINAL.

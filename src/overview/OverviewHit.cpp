@@ -186,14 +186,6 @@ void COverview::updateTileHover() {
         return;
     }
 
-    // The linger is for reaching the close button through empty space. The
-    // dock is a different surface: keep the hold and the title sits on the
-    // pill, so drop it the moment the pointer is on the dock.
-    if (Hyprdrive::Dock::uiContains(pMonitor.lock(), lastMousePosLocal)) {
-        TileChrome::setHovered(PHLWINDOW{}, false);
-        return;
-    }
-
     // ...and the same for the desktop strip (user, 2026-09-23). It is another
     // surface, not empty space on the way to a close button, and a tile left
     // blown up behind it sits in the way of the thing the pointer went to look
@@ -552,13 +544,6 @@ PHLWORKSPACE COverview::workspaceAtOverviewPoint(const Vector2D& point, size_t* 
 PHLWORKSPACE COverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& draggedWindow) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
-        return nullptr;
-
-    // X26: the dock is not a workspace, so it answers nullptr here -- and it
-    // answers FIRST, because the pill floats over the main area and the card
-    // underneath would otherwise claim the drop. Saying it once here is what
-    // keeps the drop indicator, the mini shrink and endWindowDrag agreeing.
-    if (Hyprdrive::Dock::pillContains(MONITOR, point))
         return nullptr;
 
     const auto ACTIVEIDX       = activeWorkspaceIndex();

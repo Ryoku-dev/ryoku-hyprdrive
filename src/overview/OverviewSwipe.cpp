@@ -65,7 +65,7 @@ void COverview::trackpadSwipeLayout(const PHLWORKSPACE target, const double delt
         return;
     }
 
-    // fingers lifted — snap to the nearest column
+    // fingers lifted -- snap to the nearest column
     if (delta == 0.0) {
         if (trackpadTapeFollowing) {
             trackpadTapeFollowing = false;
@@ -106,7 +106,7 @@ void COverview::trackpadSwipeWorkspace(const double delta) {
     if (!MONITOR)
         return;
 
-    // fingers lifted — snap to the nearest workspace
+    // fingers lifted -- snap to the nearest workspace
     if (delta == 0.0) {
         finishWorkspaceScrollFollow();
         return;
@@ -379,7 +379,7 @@ namespace {
 void COverview::onWorkspaceSwipeBegin() {
     trackpadWorkspaceFollowing = true;
     trackpadTapeFollowing      = false;
-    // Logical units, same as viewOffset — a slow swipe must not have to cover
+    // Logical units, same as viewOffset -- a slow swipe must not have to cover
     // a full card width on the pad.
     trackpadScrollAccum = viewOffset ? axisValue(viewOffset->value(), layout) : 0.0;
 

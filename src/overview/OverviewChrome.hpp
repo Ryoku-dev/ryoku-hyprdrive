@@ -101,6 +101,20 @@ inline SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float o
     };
 }
 
+// The overview's own chrome (the search pill and results, the strip panel and
+// cells) wears the desktop's style, not the window cards' corner: a Lithic cut,
+// in dp, turned into this monitor's px by Lithic.cornerRadius for a plane large
+// enough not to be a pill. Callers still clamp to half the box's short side,
+// which is what makes a round style's small control a pill.
+inline SOverviewCardRounding getOverviewChromeRounding(PHLMONITOR monitor, float cutDp) {
+    const float MONITORSCALE = monitor ? monitor->m_scale : 1.F;
+    const float CORNER       = Hyprdrive::Config::chromeCorner(cutDp, 1e6F, 1e6F);
+    return {
+        .rounding = std::max(0, sc<int>(std::round(CORNER * MONITORSCALE))),
+        .power    = Hyprdrive::Config::chromeCornerPower(),
+    };
+}
+
 // cutoutCenter: a halo only, nothing inside the box (and nothing inside any of
 // alsoCut either) -- for a box with no opaque fill of its own, which would
 // otherwise show the shadow colour straight through.

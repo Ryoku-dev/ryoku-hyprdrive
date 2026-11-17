@@ -11,14 +11,12 @@
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include "ShowDesktop.hpp"
-#include "Integration.hpp"
 #include "OverviewInternal.hpp"
 #include "Mosaic.hpp"
 #include "FullscreenGuard.hpp"
 #include "FlightBlur.hpp"
 #include "OpenProf.hpp"
 #include "FramePacing.hpp"
-#include "DockStacks.hpp"
 #include "SearchLetters.hpp"
 #include "KeyboardCat.hpp"
 #include "Motion.hpp"
@@ -94,7 +92,7 @@ namespace OverviewDetail {
 // Omarchy lockscreen (shell/plugins/lock/LockView.qml MultiEffect):
 //   blur: 1.0, blurMax: 128, blurMultiplier: 1.25, contrast: -0.08
 // Dual-kawase size * 2^passes ≈ 128px; contrast 0.92 ≈ 1 - 0.08; no grain.
-// Independent of decoration:blur:enabled — the lockscreen blurs even when
+// Independent of decoration:blur:enabled -- the lockscreen blurs even when
 // Omarchy windows do not.
 // The overview's 80% black over the blurred backdrop (baked into the cache).
 constexpr float BACKDROP_DIM             = 0.80F;

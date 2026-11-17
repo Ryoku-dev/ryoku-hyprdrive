@@ -2,8 +2,6 @@
 #include "HotCornerModel.hpp"
 
 #include "Config.hpp"
-#include "Dock.hpp"
-#include "DockDrop.hpp"
 #include "IOverview.hpp"
 #include "Ripple.hpp"
 
@@ -103,8 +101,6 @@ namespace Hyprdrive::HotCorner {
                 return true;
             if (g_layoutManager && g_layoutManager->dragController() && g_layoutManager->dragController()->target())
                 return true;
-            if (DockDrop::dndInProgress())
-                return true;
             if (overviewUp()) {
                 // Closing already, or mid-swipe: a toggle now would reverse it.
                 for (const auto& OV : scrollOverviews())
@@ -115,10 +111,7 @@ namespace Hyprdrive::HotCorner {
             if (pointerLocked())
                 return true;
             // A fullscreen video or game owns that screen's corners too.
-            if (Fullscreen::controller()->hasFullscreen(monitor))
-                return true;
-            const Vector2D LOCAL = (point - monitor->m_position) * monitor->m_scale;
-            return Dock::occupiesPointer(monitor, LOCAL);
+            return Fullscreen::controller()->hasFullscreen(monitor);
         }
 
         void cancel() {

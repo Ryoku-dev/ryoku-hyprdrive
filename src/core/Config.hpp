@@ -203,89 +203,43 @@ float         getGestureDetent();
 bool          getGestureDetentLabel();
 std::string   getGestureDetentSound();
 
-// Appearance is Hyprland's. Plugin keys that are unset (alpha 0 / -1 / empty)
-// read the compositor's live values, so a theme that reloads Hyprland retints
-// every surface. This is the one place those reads live; call sites do not parse
-// a second palette.
-//
-//   highlightColor()        accent ring: col_highlight, else theme:accent, else
-//                           general:col.active_border when the user (or Omarchy)
-//                           set it, else the palette file's accent, else a quiet
-//                           fg/bg mix -- never Hyprland's stock white frame
-//   themeRounding()         decoration:rounding (0 is squared, and is valid)
-//   themeRoundingPower()    decoration:rounding_power
-//   dockIndicatorColor()    dock:indicator_color, else highlightColor()
-//   cpuPulseColor()         dock:cpu_pulse_color (red unless set)
-//   dockBackgroundColor()   the terminal's glass: dock:background_color, else
-//                           theme:background, else Ghostty's background (its
-//                           config + includes + theme), else the palette
-//                           (theme:palette_file, or colors.toml on Omarchy), else
-//                           misc:background_color; opacity: dock:background_opacity,
-//                           else Ghostty's background-opacity, else 0.85 x
-//                           decoration:inactive_opacity
-//   theme*()                the six roles: theme:<role> key, else
-//                           theme:palette_file, else Omarchy's colors.toml (on
-//                           Omarchy only), else derived from Hyprland (see the
-//                           theme:* keys' registration in Config.cpp)
-//   themeFontFamily()       plugin:hyprdrive:font, else misc:font_family if
-//                           pinned, else Omarchy's fontconfig monospace (omarchy
-//                           font set) on Omarchy, else FcFontMatch("monospace")
-//   glyphFontSetting()      plugin:hyprdrive:glyph_font (auto|builtin|family),
-//                           for Fonts::iconFamily / OverviewRender::glyph
-//   dockCornerRadius()      dock:corner_radius (default 24; the pill is not a window)
-//   dock blur/shadow -1     follow decoration:blur:* / decoration:shadow:*
-//   search / results / strip  same plate as the dock (dockBackgroundColor,
-//                             highlightColor border, frost if blur:enabled);
-//                             rounding is themeRounding, not dockCornerRadius
-//
-// Pin a plugin key only to stop inheriting.
-CHyprColor    highlightColor();
-CHyprColor    restingBorderColor(); // general:col.inactive_border -- a tile at rest
-CHyprColor    highlightForeground();
-int           themeRounding();
+// The desktop's look, as Lithic roles (Theme.cpp over Look.hpp). Chrome is
+// drawn on solid planes with no blur; its corners come from a Lithic cut and
+// the style in use. The window cards keep the window's own corner.
+CHyprColor    highlightColor();      // sel: a mark of place
+CHyprColor    restingBorderColor();  // vein: every hairline at rest
+CHyprColor    highlightForeground(); // onSel: ink on a sel fill
+int           themeRounding();       // decoration:rounding, for the window cards
 float         themeRoundingPower();
-const std::string& themeFontFamily();
-float         themeTextScale(); // 1 = Hyprdrive's own sizes; Omarchy's [font] base-size / 12 (TextScale.hpp)
+const std::string& themeFontFamily(); // Geologica
+const std::string& themeMonoFamily(); // Martian Mono
 const std::string& glyphFontSetting();
-CHyprColor    dockIndicatorColor();
-CHyprColor    cpuPulseColor(); // dock:cpu_pulse_color, what a busy app's dots pulse to
-CHyprColor    dockBackgroundColor();
-int           dockCornerRadius();
 bool          isLightTheme();
 CHyprColor    themeForeground();
 CHyprColor    themeMutedText();
+CHyprColor    themeFaintText();
 CHyprColor    themeAccent();
 CHyprColor    themeHeading();
 CHyprColor    themeSelection();
 CHyprColor    themeSelectedFill();
-CHyprColor    themeSelectedRing(); // a ring for the selected row when its fill is quiet; alpha 0 = none
+CHyprColor    themeSelectedRing(); // alpha 0: Lithic marks a choice with a wash, not a ring
 CHyprColor    themeSelectedText();
 CHyprColor    themeUrgent();
+CHyprColor    themeAction();    // gold: the one consequential action of a view
+CHyprColor    themeActionInk(); // onGold
+CHyprColor    chromePlate();      // the page plane
+CHyprColor    chromeStroke();     // its hairline; alpha 0 in the round styles
+CHyprColor    chromeCard();       // a group of rows
+CHyprColor    chromeCardStroke();
+CHyprColor    chromeOverlay();    // popovers and menus
+CHyprColor    chromeScrim();
+float         chromeCorner(float cut, float w, float h);
+float         chromeCornerPower();
 
-// Everything above that reads a FILE or asks fontconfig -- the palette
-// (theme:palette_file / Omarchy's colors.toml), the fontconfig monospace, the
-// set-by-user state of the Hyprland keys the derivation reads -- is cached behind a 500ms re-stat, because
-// those sit under per-card colour reads and a stat() per colour per card per
-// frame is thousands of syscalls a second. The poll alone would show a theme
-// change up to half a second late; it never does, because `omarchy theme set`
-// reloads Hyprland and the reload listener calls this first. The poll only
-// covers a file edited underneath a theme that is already current.
+// Bumped by every reload and every new look, for caches keyed on the theme.
 void          invalidateThemeCache();
-// The number invalidateThemeCache() bumps, for a cache that lives outside
-// Config.cpp (BorderFade's `border` curve) to re-read on the same reload.
 uint64_t      themeGeneration();
 
-// A hash over the LIVE values of every plugin:hyprdrive:dock: key. Taken on
-// config.preReload and again on config.reloaded, it answers the only question
-// that reload listener actually has: did this reload move the dock's layout?
-//
-// Enumerated from the registration list, not from a hand-written key list -- a
-// list is a thing to forget, and a dock key added later and left out of it
-// would let a minimize flight chase an icon the new layout has moved. A key
-// whose type is not one of the five the dock uses mixes in a counter instead,
-// so the fingerprint cannot compare equal and the caller falls back to what it
-// did before this existed.
-uint64_t      dockKeyFingerprint();
 
 float         getScale();
 float         getOpenSpeed();
@@ -329,7 +283,7 @@ EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 EBackdrop     getBackdrop();
 std::string   getTerminal();
-std::string   getSearchTerminal(); // plugin:hyprdrive:search:terminal (AI agent rows off Omarchy)
+std::string   getSearchTerminal(); // plugin:hyprdrive:search:terminal (where AI agent rows open)
 bool          getMissionControl();
 int           getMissionControlGap();
 int           getMissionControlReflowMs();

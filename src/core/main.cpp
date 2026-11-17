@@ -33,14 +33,6 @@ bool damageFromSurface = false;
 PHLMONITORREF renderingOverviewMonitor;
 bool g_scrollOverviewHooksActive = false;
 
-// X30. The autohide barrier needs the RELATIVE motion, which only this call
-// carries: the bus's mouse.move gives the absolute position, and at the bottom
-// edge the cursor is clamped, so the position stops changing while the user is
-// still pushing. Fed AFTER the original, so the position the barrier tests
-// against is the one this motion produced.
-// The arrow over the dock's chrome on the desktop (see g_pDockHoverHook).
-bool g_dockCursor = false;
-
 // ConfigureHold.hpp: a gesture's in-between sizes never reach the client.
 CFunctionHook* g_pSendWindowSizeHook = nullptr;
 
@@ -50,8 +42,7 @@ CFunctionHook* g_pShouldRenderWindowHook = nullptr;
 } // namespace PluginDetail
 
 namespace PluginDetail {
-// DockRoom.hpp: tiled windows make room for a dock that does not hide.
-// OwnSizeTile.hpp, inside it: a fixed-size window's tile has room for it.
+// OwnSizeTile.hpp: a fixed-size window's tile has room for it.
 CFunctionHook* g_pTargetPlaceHook = nullptr;
 
 // Keycodes, not a count: Super-tap key-repeat used to increment a counter
@@ -131,7 +122,6 @@ static CHyprSignalListener g_pMembOpenHook;
 static CHyprSignalListener g_pMembLateHook;
 static CHyprSignalListener g_pMembCloseHook;
 static CHyprSignalListener g_pMembKillHook;
-static CHyprSignalListener g_pDockFocusHook; // Dock::noteFocus
 static CHyprSignalListener g_pMembGoneHook;
 static CHyprSignalListener g_pMembPinHook;
 static CHyprSignalListener g_pMembFloatHook;
@@ -139,16 +129,10 @@ static CHyprSignalListener g_pMembTitleHook;
 static CHyprSignalListener g_pMembClassHook;
 static CHyprSignalListener g_pMembWsHook;
 static CHyprSignalListener g_pMembFullHook;
-static CHyprSignalListener g_pDockConfigHook;
-static CHyprSignalListener g_pDockHoverHook;
-static CHyprSignalListener g_pDockClickHook;
-static CHyprSignalListener g_pDockScrollHook;
-static CHyprSignalListener g_pDockRenderHook;
-static CHyprSignalListener g_pDockStandDownHook;
-static CHyprSignalListener g_pDockFsWsHook;
-static CHyprSignalListener g_pDockFsSpecialHook;
-// The doLater standDownSoon queued; 0 = none (cancelled at unload).
-static uint32_t            g_dockStandDownSeq = 0;
+static CHyprSignalListener g_pConfigHook;
+static CHyprSignalListener g_pPointerMoveHook;
+static CHyprSignalListener g_pPointerButtonHook;
+static CHyprSignalListener g_pDesktopRenderHook;
 static CHyprSignalListener g_pScratchExitRenderHook;
 static CHyprSignalListener g_pMonitorGoneHook;
 static CHyprSignalListener g_pScrollCameraActiveHook;
@@ -214,9 +198,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pScrollAddDamageHookA = Hyprdrive::FunctionHooks::required("main", "_ZN7Monitor8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}, rc<void*>(hkAddDamageA));
 
-    // X30. Hooked HERE and not through ensureScrollOverviewHooks(): those go on
-    // and off with the overview, and the autohide barrier lives on the plain
-    // desktop, which is exactly where they are not installed.
+    // Hooked here and not through ensureScrollOverviewHooks(): those go on and
+    // off with the overview, and Mosaic's resize and the edge springs live on
+    // the plain desktop, where they are not installed.
     g_pScrollMouseMovedHook = Hyprdrive::FunctionHooks::required("main", "onMouseMoved", {"CInputManager::onMouseMoved("}, rc<void*>(hkOnMouseMoved));
     g_pScrollMouseMovedHook->hook();
 
@@ -226,7 +210,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pSendWindowSizeHook = Hyprdrive::FunctionHooks::required("main", "sendWindowSize", {"Layout::CWindowTarget::sendWindowSize("}, rc<void*>(hkSendWindowSize));
     g_pSendWindowSizeHook->hook();
 
-    // ONE hook that DockRoom and OwnSizeTile both ride (Hooks.cpp, hkTargetPlace).
+    // OwnSizeTile's tile placement (Hooks.cpp, hkTargetPlace).
     g_pTargetPlaceHook = Hyprdrive::FunctionHooks::required("main", "setPositionGlobal", {"CWindowTarget::setPositionGlobal("}, rc<void*>(hkTargetPlace));
     g_pTargetPlaceHook->hook();
     Hyprdrive::ConfigureHold::setSender([](Desktop::View::CWindow* window, bool force) {
@@ -252,8 +236,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (const auto overview = scrollOverviewForMonitor(monitor))
             overview->onPreRender();
 
-        Hyprdrive::Dock::damageIfChanged(monitor);
-
         // The desktop strip's place for this frame (DesktopStrip.hpp), then a
         // canvas desktop a swipe brings in starts past its overhang (Mosaic.cpp).
         Hyprdrive::DesktopSwitch::preRender(monitor);
@@ -269,39 +251,22 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
         // Layout motion blur (FlightBlur.hpp). The overview draws its own
         // windows; there, only the sweep runs.
-        Hyprdrive::DockRoom::watch(monitor);
 
-        const auto FLYING = [](const PHLWINDOW& w) { return Hyprdrive::Flight::hasFlight(w); };
         if (!scrollOverviewForMonitor(monitor))
-            Hyprdrive::FlightBlur::trackLayoutMotion(monitor, FLYING);
+            Hyprdrive::FlightBlur::trackLayoutMotion(monitor, [](const PHLWINDOW&) { return false; });
         else {
             // The overview draws its own tiles; only a special workspace (the
             // scratchpad opening or closing over it) is drawn natively, through
-            // the renderer the blur rides (user, 2026-09-30).
-            Hyprdrive::FlightBlur::trackLayoutMotion(monitor, [&FLYING](const PHLWINDOW& w) {
-                return FLYING(w) || !w->m_workspace || !Hyprdrive::Compat::isSpecial(w->m_workspace);
-            });
+            // the renderer the blur rides.
+            Hyprdrive::FlightBlur::trackLayoutMotion(monitor, [](const PHLWINDOW& w) { return !w->m_workspace || !Hyprdrive::Compat::isSpecial(w->m_workspace); });
         }
+
+        // Whatever animates on a desktop nothing else repaints asks for the
+        // next frame here (FramePump.cpp's SOURCES).
+        if (Hyprdrive::FramePump::reason(monitor))
+            Hyprdrive::FramePump::request(monitor);
     });
 
-    // X27. NOT the renderWorkspace hook: that one is installed on demand by
-    // ensureScrollOverviewHooks() and dropped again by removeOverview(), so it
-    // does not exist on a plain desktop -- which is exactly where a dock lives.
-    // POST_WINDOWS also puts the dock above windows and below the bar's top
-    // layer.
-    //
-    // §10 clause 6, pinned-in-overview: this stage fires far below the overview's
-    // own pass, so the pill was buried under it. The overview now draws the dock
-    // itself at the end of its render, and this hook stands down for that monitor
-    // -- otherwise the pill is drawn twice and its translucent background blends
-    // over itself.
-    // The dock's hover highlight on a PLAIN desktop. render.pre only fires when a
-    // frame is already happening, so on an idle desktop a pointer move over the
-    // pill damages nothing and the highlight never appears. The overview has its
-    // own mouse hook and calls this from there.
-    // X30. Flipping dock-fixed at runtime damages nothing by itself: with the
-    // pointer still and no window repainting, there is no frame for the dock to
-    // be drawn into and the change would not show until something else moved.
     // P6i1 SHADOW. Everything the compositor tells us that can change the
     // membership gate's answer: what windows exist, and the four properties the
     // gate reads off one. The plugin's own mutators -- setHidden for a flight,
@@ -309,21 +274,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // no event announces them.
     g_pMembOpenHook  = Event::bus()->m_events.window.open.listen([](PHLWINDOW w) {
         Membership::bump("window.open");
-        Hyprdrive::Dock::onWindowOpen(w);
-        Hyprdrive::Dock::noteFullscreenCover();
     });
     g_pMembLateHook  = Event::bus()->m_events.window.openLate.listen([](PHLWINDOW) { Membership::bump("window.openLate"); });
     g_pMembCloseHook = Event::bus()->m_events.window.close.listen([](PHLWINDOW w) {
         Membership::bump("window.close");
         Hyprdrive::Mosaic::onWindowClose(w); // its mosaic size, remembered per app
-        Hyprdrive::Dock::onWindowClose(w);   // a menu row for it leaves the menu
-        Hyprdrive::Dock::noteFullscreenCover();
     });
     g_pMembKillHook  = Event::bus()->m_events.window.kill.listen([](PHLWINDOW) { Membership::bump("window.kill"); });
-    g_pDockFocusHook = Event::bus()->m_events.window.active.listen([](PHLWINDOW w, Desktop::eFocusReason reason) {
-        Hyprdrive::Dock::noteFocus(w, reason);
-        Hyprdrive::Dock::noteFullscreenCover();
-    });
     g_pMembGoneHook  = Event::bus()->m_events.window.destroy.listen([](PHLWINDOWREF) { Membership::bump("window.destroy"); });
     g_pMembPinHook   = Event::bus()->m_events.window.pin.listen([](PHLWINDOW) { Membership::bump("window.pin"); });
     g_pMembFloatHook = Event::bus()->m_events.window.floating.listen([](PHLWINDOW) { Membership::bump("window.floating"); });
@@ -332,40 +289,21 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pMembWsHook    = Event::bus()->m_events.window.moveToWorkspace.listen([](PHLWINDOW w, PHLWORKSPACE ws) {
         Hyprdrive::Minimize::onWindowMoved(w, ws); // B24: off the stash = not minimized
         Membership::bump("window.moveToWorkspace");
-        Hyprdrive::Dock::noteFullscreenCover();
     });
-    g_pMembFullHook  = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) {
-        Membership::bump("window.fullscreen");
-        Hyprdrive::Dock::noteFullscreenCover();
-    });
-    // The dock over a fullscreen window (DockFullscreen.cpp): what a monitor
-    // shows changes with its desktop too.
-    g_pDockFsWsHook      = Event::bus()->m_events.workspace.active.listen([](PHLWORKSPACE) { Hyprdrive::Dock::noteFullscreenCover(); });
-    g_pDockFsSpecialHook = Event::bus()->m_events.workspace.specialActive.listen([](PHLWORKSPACE, PHLMONITOR) { Hyprdrive::Dock::noteFullscreenCover(); });
+    g_pMembFullHook  = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { Membership::bump("window.fullscreen"); });
 
-    // The dock's keys as they stood BEFORE this reload parsed anything. See the
-    // abortAll below for what it is compared against.
-    static uint64_t s_dockKeysBeforeReload = 0;
+    g_pClickPreReloadHook = Event::bus()->m_events.config.preReload.listen([] { clearClickGestures(); });
 
-    g_pClickPreReloadHook = Event::bus()->m_events.config.preReload.listen([] {
-        clearClickGestures();
-        s_dockKeysBeforeReload = Hyprdrive::Config::dockKeyFingerprint();
-    });
-
-    g_pDockConfigHook = Event::bus()->m_events.config.reloaded.listen([] {
+    g_pConfigHook = Event::bus()->m_events.config.reloaded.listen([] {
         // A no-op unless the pointer set changed -- a reload is not a reason to
         // drop a touchpad gesture that is still under the hand.
         attachPadFingerListeners();
         Hyprdrive::FingerSwipe::rescan();
-        Hyprdrive::Dock::noteFullscreenCover(); // DockFullscreen.cpp
         // FIRST, before anything in this plugin reads a config value this pass:
         // a value the user set under the old plugin:scrolloverview: name is
         // copied onto its plugin:hyprdrive: twin here and nowhere else, so the
         // rest of the codebase only ever knows the new name. ONE RELEASE.
         Hyprdrive::Compat::adoptLegacyValues();
-        // Straight after: everything below may ask Integration::omarchy(), and
-        // plugin:hyprdrive:integration (or the env) may have just changed.
-        Hyprdrive::Integration::reevaluate();
         // A reload writes the user's render:new_render_scheduling back.
         Hyprdrive::FramePacing::apply();
         // A reload can drop plugin-registered beziers, and may have changed the
@@ -375,30 +313,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         OvInternal::gridTileOrderReload();
         healStuckOverviewSubmap();
 
-        // `omarchy theme set` writes colors.toml and reloads Hyprland, so the
-        // reload IS the theme change as far as this plugin is concerned. Drop
-        // the palette and font caches here and the new theme is on the next
-        // frame rather than up to half a second later.
+        // The look can change with a reload (a theme writes Hyprland's
+        // decoration keys): drop the palette and font caches so it shows on the
+        // next frame.
         Hyprdrive::Config::invalidateThemeCache();
-
-        // A reload rebuilds the dock's whole layout under whatever is flying,
-        // and a flight's boxes are the OLD layout's -- its icon target can move,
-        // shrink, or stop existing. Land them first, with the landing every
-        // other end of a flight gets, rather than let one chase an icon that is
-        // no longer there.
-        //
-        // ONLY when a dock key actually moved, though. Every theme switch and
-        // every unrelated `hyprctl reload` came through here and snapped an
-        // in-flight minimize to its end, for a reload that cannot have touched
-        // the layout the flight is aiming at. Taken AFTER adoptLegacyValues so a
-        // value arriving under the old name counts as the change it is.
-        if (const auto DOCKKEYS = Hyprdrive::Config::dockKeyFingerprint(); DOCKKEYS != s_dockKeysBeforeReload) {
-            s_dockKeysBeforeReload = DOCKKEYS;
-            Hyprdrive::Flight::abortAll("config-reload");
-        }
-
-        for (const auto& MONITOR : State::monitorState()->monitors())
-            Hyprdrive::Dock::damageIfChanged(MONITOR);
 
         // The reload just overwrote the overrides an OPEN overview installed
         // (workspace animations, follow_mouse, no_warps) -- without this, a
@@ -410,262 +328,43 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     });
 
-    g_pDockHoverHook = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo& info) {
+    g_pPointerMoveHook = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo& info) {
         const auto HIT = monitorUnderCursor();
 
-        // The scratchpad's drag-out zone rides the same motion (it is a desktop
-        // surface like the dock, and a drag is nothing but motion).
+        // The scratchpad's drag-out zone rides the same motion.
         Hyprdrive::ScratchpadExit::onPointerMove(HIT ? HIT->first : PHLMONITOR{});
-        // Dock stacks B: a drag of files over the dock (prefetch + target).
-        Hyprdrive::DockDrop::onPointerMove(HIT ? HIT->first : PHLMONITOR{}, HIT ? HIT->second : Vector2D{});
-        // A fan item pulled out becomes a real drag (DockDrop::startFileDrag).
-        Hyprdrive::Stacks::onPointerMove();
-        // A pointer lock (a game) owns the cursor wherever its lock point sits.
-        // Taking the seat here, or cancelling this motion, skips Hyprland's own
-        // lock code -- the game lost the mouse whenever its lock point lay over
-        // the pill (Dock::pointerHeldByClient, user 2026-10-19). And a dock
-        // that is not drawn (a fullscreen window on the solitary path) is not
-        // there to be on: same stand-down (Dock::notDrawnOn, issue #11).
-        const bool LOCKED = HIT ? Hyprdrive::Dock::inputInert(HIT->first) : Hyprdrive::Dock::pointerHeldByClient();
         // Mosaic's corner resize: the resize cursor over a grabbable corner.
-        Hyprdrive::Mosaic::onMove(!HIT || LOCKED || Hyprdrive::Dock::occupiesPointer(HIT->first, HIT->second) || Hyprdrive::Stacks::ownsHover(HIT->first, HIT->second) ||
-                                       g_pSessionLockManager->isSessionLocked());
-        // The zoomed-out canvas (Mosaic::zoomOwnsPointer): no window under the
-        // pointer's full-size place gets the motion or focus, and the arrow
-        // (no client's text cursor) while it lasts.
+        Hyprdrive::Mosaic::onMove(!HIT || g_pSessionLockManager->isSessionLocked());
         // Through the bar: the window under it takes focus (Mosaic.hpp).
         if (HIT && !g_pSessionLockManager->isSessionLocked())
             Hyprdrive::Mosaic::focusUnderBar();
-        if (Hyprdrive::Mosaic::zoomOwnsPointer()) {
+        // The zoomed-out canvas owns the pointer: no window under its full-size
+        // place gets the motion or focus while it lasts.
+        if (Hyprdrive::Mosaic::zoomOwnsPointer())
             info.cancelled = true;
-            setDockCursor(true);
-            return;
-        }
-
-        if (!HIT || LOCKED) {
-            Hyprdrive::Dock::releasePointerFocus();
-            setDockCursor(false);
-            if (HIT)
-                Hyprdrive::Dock::damageIfChanged(HIT->first); // a pill that is out slides away
-            return;
-        }
-        const auto& [MONITOR, LOCAL] = *HIT;
-
-        // X32. The desktop dock reorders too, and its drag needs motion for
-        // the same reason the highlight does: on an idle desktop nothing
-        // else is asking for a frame.
-        if (Hyprdrive::Dock::dragPending())
-            Hyprdrive::Dock::dragMove(MONITOR, LOCAL);
-
-        Hyprdrive::Dock::syncPointerFocus(MONITOR, LOCAL);
-        Hyprdrive::Dock::damageIfChanged(MONITOR);
-
-        // HOVER MUST NOT PASS THROUGH (user, 2026-09-29): over the dock's
-        // chrome -- pill, hover previews, menu, a stack's fan/pane -- the window
-        // underneath got the motion anyway (link highlights, hover states),
-        // because this is a listener and Hyprland went on to focus the surface
-        // under the cursor. Cancelling here returns from mouseMoveUnified before
-        // that (the cursor itself has already moved). Not with the overview up
-        // (it owns its own input), and not during a drag-and-drop, whose target
-        // Hyprland must keep tracking.
-        // An open fan's gaps count too (Stacks::ownsHover): crossing between
-        // its papers must not focus the window under them.
-        const bool ON_CHROME = !scrollOverviewForMonitor(MONITOR) && !Hyprdrive::DockDrop::dndInProgress() &&
-            (Hyprdrive::Dock::occupiesPointer(MONITOR, LOCAL) || Hyprdrive::Stacks::ownsHover(MONITOR, LOCAL));
-        if (ON_CHROME)
-            info.cancelled = true;
-        // The cancel also skips Hyprland's cursor-shape update, so a pointer that
-        // came off a text field kept the I-beam over the dock. The dock owns the
-        // lowest override group (UNKNOWN -- Hyprland itself never sets it), so a
-        // resize edge, a drag or the overview's own override still win.
-        setDockCursor(ON_CHROME);
     });
 
-    // X24 dock-side. The overview installs its own button hook; this one is the
-    // plain desktop, where nothing else claims a click on the pill. Both edges
-    // are swallowed over the pill: the dock is not a window, so a press that
-    // reached the window underneath would focus it, and a release that leaked
-    // after a swallowed press would leave the pointer stuck.
-    g_pDockClickHook = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+    g_pPointerButtonHook = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
         if (handleClickGestureButton(event)) {
             info.cancelled = true;
             return;
         }
-
-        // Mosaic's corner resize (Mosaic.hpp). Not over the dock or an open
-        // overview (monitorUnderCursor skips those monitors), not while locked.
-        {
-            const auto HITM = monitorUnderCursor();
-            if (Hyprdrive::Mosaic::onButton(event, !HITM || Hyprdrive::Dock::occupiesPointer(HITM->first, HITM->second) || g_pSessionLockManager->isSessionLocked())) {
-                info.cancelled = true;
-                return;
-            }
-        }
-
+        // Mosaic's corner resize (Mosaic.hpp). Not over an open overview
+        // (monitorUnderCursor skips those monitors), not while locked.
         const auto HIT = monitorUnderCursor();
-        if (!HIT)
-            return;
-        const auto& [MONITOR, LOCAL] = *HIT;
-
-        // Dock stacks B: a drag of files released over the dock is the dock's.
-        // Runs before Hyprland's own drop listener (registered at drag start).
-        if (Hyprdrive::DockDrop::onButton(MONITOR, LOCAL, event.state == WL_POINTER_BUTTON_STATE_PRESSED)) {
-            info.cancelled = true;
-            return;
-        }
-
-        // The plain desktop's button map is fixed: right opens the menu, middle
-        // launches, left drives the pill. (The overview honours the left-handed
-        // config; the desktop dock never has.) The ladder and the reasons for its
-        // order live in DockInput -- this is the same dock the overview drives.
-        const auto ROLE = event.button == BTN_RIGHT  ? Hyprdrive::DockInput::EButton::Menu
-                        : event.button == BTN_MIDDLE ? Hyprdrive::DockInput::EButton::Launch
-                        : event.button == BTN_LEFT   ? Hyprdrive::DockInput::EButton::Main
-                        : Hyprdrive::DockInput::EButton::Other;
-        const bool PRESSED = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
-
-        // A window dragged back onto the dock goes home the way it does in the
-        // overview: the whole minimize FLIGHT -- shrink into the icon, bounce on
-        // landing -- and not a silent snap. This is new because the premise
-        // below used to hold: before the dock tear-out there was no such thing
-        // as a window drag on the plain desktop, so there was nothing to catch.
-        if (!PRESSED && ROLE == Hyprdrive::DockInput::EButton::Main && Hyprdrive::Dock::dockOwnsNativeDrag() && g_layoutManager &&
-            g_layoutManager->dragController()) {
-            const auto TARGET  = g_layoutManager->dragController()->target();
-            const auto DRAGGED = TARGET ? TARGET->window() : PHLWINDOW{};
-            const bool ONDOCK  = Hyprdrive::Dock::pillContains(MONITOR, LOCAL);
-
-            // END IT OURSELVES. The dock swallowed the press that started this
-            // drag, so Hyprland never entered its own button state machine for
-            // it and nothing on its side will let go -- the button came up and
-            // the window kept following the pointer until the NEXT click.
-            // ONLY WITH A TARGET: Hyprland's dragEnd dereferences it unchecked
-            // (DragController.cpp: m_target.lock()->window()), and the drag may
-            // have ended already or its window gone -- releasing then SIGSEGV'd
-            // the compositor (XPS, 2026-11-06 11:19, the whole session lost).
-            if (TARGET)
-                g_layoutManager->dragController()->dragEnd();
-            Hyprdrive::Dock::clearDockNativeDrag();
-            const auto ANCHOR = Hyprdrive::Placement::takeDragAnchor();
-
-            // Dropped back onto the dock: the whole minimize flight, same as the
-            // overview does, rather than a silent snap.
-            if (ONDOCK && DRAGGED)
-                Hyprdrive::Flight::minimize(MONITOR, DRAGGED, true); // bounce at the drop, Z10
-            // Anywhere else: dragEnd just tiled it off the CURSOR (the window under
-            // it, the side it was on). Re-file it the way opening it would --
-            // AFTER dragEnd, which is also what has lowered the drag flag.
-            else if (DRAGGED)
-                Hyprdrive::Placement::retileAsNew(DRAGGED, ANCHOR);
-
-            info.cancelled = true;
-            return;
-        }
-
-        // A pointer lock's click, or a click where the dock is not drawn, is
-        // the window's (Dock::inputInert): the pill's ladder below would act on
-        // an icon the user cannot see, or under a game's lock point.
-        if (Hyprdrive::Dock::inputInert(MONITOR))
-            return;
-
-        // Desktop never has a window drag in flight, and lets a menu miss through
-        // (its menu may have no drawn geometry to hit-test); a let-through miss
-        // then falls into the pill ladder, exactly as the overview's own dock does.
-        //
-        // Then the frame what the click changed needs, asked for here: a click
-        // with the pointer still has no motion event behind it to ask. With
-        // motion on, the tooltip's fade or the hover lean happened to be
-        // pumping frames under the pointer anyway; with motion off nothing
-        // was, and a menu opened by a right-click stayed undrawn -- its rows
-        // 0x0, nothing on screen -- until something else repainted (owner,
-        // XPS, 2026-11-13). damageIfChanged damages only what changed, and
-        // pumps the frames an animation that the click started asks for.
-        const bool CLAIMED = Hyprdrive::DockInput::handleMenu(MONITOR, LOCAL, ROLE, PRESSED, false, true).claimed ||
-            Hyprdrive::DockInput::handlePill(MONITOR, LOCAL, ROLE, PRESSED, false).claimed;
-        Hyprdrive::Dock::damageIfChanged(MONITOR);
-        if (CLAIMED) {
-            info.cancelled = true;
-            return;
-        }
-
-        // Hold-Super window pills are disabled on this fork.
-    });
-
-    // X33. The wheel over the pill, on the PLAIN desktop only.
-    //
-    // Deliberate divergence, and the one place X33 does not copy the reference:
-    // with the overview open the reference scrolls the dash's icon to
-    // `this.app.activate()`, which would close the overview on a wheel graze.
-    // The pill is pinned OVER the overview here (§10 clause 6) and the wheel is
-    // the overview's primary navigation, so inside it the overview keeps the
-    // tick. Recorded rather than silently dropped.
-    g_pDockScrollHook = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent event, Event::SCallbackInfo& info) {
-        // Vertical only. A horizontal wheel has no reference behaviour.
-        // Wheel, finger, and continuous (touchpad) all count: SOURCE_WHEEL
-        // alone left laptop two-finger scrolls going to the window under the
-        // pill. Dead time in Dock::scroll turns a finger stream into steps.
-        if (event.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || event.delta == 0.0)
-            return;
-        if (event.source == WL_POINTER_AXIS_SOURCE_WHEEL_TILT)
-            return;
-
-        const auto HIT = monitorUnderCursor();
-        if (!HIT || Hyprdrive::Dock::inputInert(HIT->first)) // a game's wheel is the game's; so is one over an undrawn dock
-            return;
-        const auto& [MONITOR, LOCAL] = *HIT;
-
-        if (Hyprdrive::Dock::occupiesPointer(MONITOR, LOCAL))
-            Hyprdrive::Dock::syncPointerFocus(MONITOR, LOCAL);
-
-        Hyprdrive::Stacks::noteAxis(event.delta, event.source == WL_POINTER_AXIS_SOURCE_WHEEL);
-        if (Hyprdrive::Dock::scroll(MONITOR, LOCAL, event.delta < 0.0))
+        if (Hyprdrive::Mosaic::onButton(event, !HIT || g_pSessionLockManager->isSessionLocked()))
             info.cancelled = true;
     });
 
-    g_pDockRenderHook = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
-        if (e.stage != RENDER_POST_WINDOWS)
+    g_pDesktopRenderHook = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
+        if (e.stage != RENDER_POST_WINDOWS || scrollOverviewForMonitor(e.monitor))
             return;
-
-        const auto MONITOR = e.monitor;
-        if (scrollOverviewForMonitor(MONITOR))
-            return;
-
-        // Y7. No overview means no window drag, and this is also what clears
-        // the flag if the overview closed while one was in flight.
-        Hyprdrive::Dock::setWindowDragActive(false);
-
-        Hyprdrive::Mosaic::renderZoomLabels(MONITOR);
-        Hyprdrive::Dock::render(MONITOR);
-        // A file dragged out of a fan: its icon under the pointer, over the dock.
-        Hyprdrive::DockDrop::renderGhost(MONITOR);
+        Hyprdrive::Mosaic::renderZoomLabels(e.monitor);
     });
 
-    // THE SEAT GOES BACK WHEN THE DOCK STANDS DOWN, not on the next motion
-    // (issue #11). The pointer resting on the dock holds the seat
-    // (syncPointerFocus); a window that then goes fullscreen on the solitary
-    // path, or takes a pointer lock, leaves it held -- under a lock no motion
-    // ever reaches the dock's test again, so the game had no keyboard and no
-    // mouse until the focus moved. render.preChecks fires for every frame,
-    // direct scanout included (RENDER_BEGIN does not), and is cheap here: two
-    // flags and a pointer compare unless the seat is held. The release itself
-    // runs outside the frame.
-    g_pDockStandDownHook = Event::bus()->m_events.render.preChecks.listen([](PHLMONITOR monitor) {
-        if (g_dockStandDownSeq || !Hyprdrive::Dock::seatHeld() || !g_pEventLoopManager || !Hyprdrive::Dock::inputInert(monitor))
-            return;
-        g_dockStandDownSeq = g_pEventLoopManager->doLater([] {
-            g_dockStandDownSeq = 0;
-            const auto HIT = monitorUnderCursor();
-            if (!Hyprdrive::Dock::seatHeld() || !(HIT ? Hyprdrive::Dock::inputInert(HIT->first) : Hyprdrive::Dock::pointerHeldByClient()))
-                return;
-            Hyprdrive::Dock::releasePointerFocus();
-            setDockCursor(false);
-        });
-    });
-
-    // The scratchpad's drag-out zone draws at the LAST moment, not with the
-    // dock: it sits at the very top of the screen (user, 2026-09-24: "bump it
-    // all the way to the top"), where the bar lives, and POST_WINDOWS is below
-    // the top layer -- the bar would paint over it.
+    // The scratchpad's drag-out zone draws at the LAST moment: it sits at the
+    // very top of the screen, where the bar lives, and POST_WINDOWS is below
+    // the top layer, so the bar would paint over it.
     g_pScratchExitRenderHook = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
         if (e.stage != RENDER_LAST_MOMENT)
             return;
@@ -686,9 +385,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // which is what keeps this from queueing a deferred destroy that would never
     // run -- PLUGIN_EXIT owns teardown there.
     //
-    // Flights first: they are settled while the overview is still registered, so
-    // an unhidden window is re-added to the draw list it is about to leave with
-    // rather than after it.
     // Before the desktop is drawn, not after: corrected on the first frame it
     // would slide the window across the screen instead of simply being right.
     // See normalizeFittingScrollingOffset.
@@ -698,28 +394,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     normalizeAllScrollingCameras();
 
     g_pMonitorGoneHook = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
-        Hyprdrive::Flight::abortAll("monitor-removed");
         dropScrollOverviewsForMonitor(monitor);
         if (monitor) {
-            Hyprdrive::Dock::forgetMonitor(monitor->m_id);
             if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend() : WP<Render::GL::CHyprOpenGLImpl>{})
                 OPENGL->makeEGLCurrent();
             Hyprdrive::releaseWallpaperStash(monitor->m_id);
         }
-        // A stack popup on the monitor that went away must not keep the keyboard.
-        if (monitor && Hyprdrive::Stacks::popupMonitor() == monitor->m_id)
-            Hyprdrive::Stacks::close();
     });
 
     Hyprdrive::Config::registerDispatcher("overview", ::onOverviewDispatcher);
     Hyprdrive::Config::registerDispatcher("navigate", ::onNavigateDispatcher);
     Hyprdrive::Config::registerDispatcher("window", ::onWindowDispatcher);
-    Hyprdrive::Config::registerDispatcher("minimize", ::onMinimizeDispatcher);
-    Hyprdrive::Config::registerDispatcher("hotkey", ::onHotkeyDispatcher);
-    Hyprdrive::Config::registerDispatcher("stack", ::onStackDispatcher);
     Hyprdrive::Config::registerDispatcher("gesture", ::onGestureDispatcher);
     Hyprdrive::Config::registerDispatcher("debug", ::onDebugDispatcher);
-    // Open the settings (SettingsApp.hpp): the Omarchy panel or the standalone app.
+    // Open the settings: the Hyprdrive page of Ryoku Settings (SettingsApp.hpp).
     Hyprdrive::Config::registerDispatcher("settings", Hyprdrive::SettingsApp::dispatch);
     // Super+scroll's next / previous desktop (DesktopSwitch.hpp).
     Hyprdrive::Config::registerDispatcher("desktop", Hyprdrive::DesktopSwitch::dispatch);
@@ -728,21 +416,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     Hyprdrive::Config::registerConfig();
     // Its keys exist now: the overview's tile order (also on every reload).
     OvInternal::gridTileOrderReload();
-    // The Omarchy-or-not answer, now that its key exists, and the hyprctl
-    // command scripts ask it through (Integration.hpp).
-    Hyprdrive::Integration::init();
-    // ...which the search asks on every row build, through plain function
-    // pointers because SearchBackend.cpp and SearchProviders.cpp are linked
-    // into host tests that have no Integration or Config (SearchBackend.hpp
-    // SHost; SearchProviders.hpp setActivation). Live reads, not a snapshot:
-    // a reload that flips plugin:hyprdrive:integration is on the next frame.
+    // Plain function pointers: SearchBackend.cpp is linked into host tests that
+    // have no Config (SearchBackend.hpp SHost).
     SearchBackend::setHost({
-        .omarchy          = [] { return Hyprdrive::Integration::omarchy(); },
         .terminalTemplate = [] { return Hyprdrive::Config::getSearchTerminal(); },
         .appTerminal      = [] { return Hyprdrive::Config::getTerminal(); },
     });
-    SearchProviders::setActivation([] { return Hyprdrive::Integration::omarchy(); });
-    // `hyprctl hyprdrive-theme`: the derived palette, for the settings app.
+    // A search never starts a GNOME search provider's app behind the user's
+    // back: a running one still answers (SearchProviders.hpp setActivation).
+    SearchProviders::setActivation([] { return false; });
+    // The desktop's look, read from the Lithic bridge (Look.hpp).
+    Hyprdrive::Look::init();
+    // `hyprctl hyprdrive-binds` / `hyprdrive-theme` (SettingsApp.hpp).
     Hyprdrive::SettingsApp::init();
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
@@ -752,8 +437,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Which app each window is (IdentityLive.hpp): its worker builds the
     // Steam and Lutris indexes and resolves every window off this thread.
     Hyprdrive::AppIdentity::init();
-    // Each monitor's row of desktops (Omarchy's workspace blocks): before
-    // anything renumbers.
+    // Each monitor's row of desktops (Ryoku's blocks of ten): before anything
+    // renumbers.
     Hyprdrive::Rows::init();
     Hyprdrive::FullscreenDesktop::init();
     Hyprdrive::ShowDesktop::init();
@@ -762,10 +447,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Where every new window goes: the one openEarly decision (Placement.hpp).
     // After Intent, FullscreenDesktop and OwnSizeTile, which it calls.
     Hyprdrive::WindowPlacement::init();
-    // Super+F / Super+W on the hovered overview tile or dock preview (HoverActions.hpp).
+    // Super+F / Super+W on the hovered overview tile (HoverActions.hpp).
     Hyprdrive::HoverActions::init();
-    // dock:cpu_pulse's sampler (CpuPulse.hpp): idle unless the option is on.
-    Hyprdrive::CpuPulse::init();
     // The animation:curve preset onto Hyprland's named house beziers -- only
     // now that the key exists (Config.hpp: an earlier read aborts Hyprland).
     Hyprdrive::Motion::sync();
@@ -788,34 +471,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     Hyprdrive::FlightBlur::init();
 
     // Reload can drop live window alphas until decorations are recomputed.
-    // Re-apply default-opacity (0.985 / 0.85) to already-mapped windows.
     if (Desktop::globalWindowController())
         Desktop::globalWindowController()->updateAllWindowsDecorations();
-
-    // ONE RELEASE. Pinned dock apps are user data; they do not get to disappear
-    // because the plugin changed its name. Both are one-shot and no-ops once
-    // the config and the store have been migrated.
-    Hyprdrive::Compat::adoptLegacyFavorites();
-    Hyprdrive::Compat::adoptLegacyValues();
 
     if (g_pCompositor && g_pCompositor->m_wlEventLoop) {
         g_fileWakeFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
         if (g_fileWakeFd >= 0) {
             g_fileWakeSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, g_fileWakeFd, WL_EVENT_READABLE, onFileResultsReady, nullptr);
             SearchBackend::setResultsCallback([]() {
-                if (g_fileWakeFd >= 0) {
-                    uint64_t one = 1;
-                    ::write(g_fileWakeFd, &one, sizeof(one));
-                }
-            });
-            // Stack folder reads and trash jobs land off-thread too; same wake.
-            Hyprdrive::Thumbs::setReadyCallback([]() {
-                if (g_fileWakeFd >= 0) {
-                    uint64_t one = 1;
-                    ::write(g_fileWakeFd, &one, sizeof(one));
-                }
-            });
-            Hyprdrive::StackReader::setReadyCallback([]() {
                 if (g_fileWakeFd >= 0) {
                     uint64_t one = 1;
                     ::write(g_fileWakeFd, &one, sizeof(one));
@@ -847,7 +510,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // dlclosed with no PLUGIN_EXIT, which would leave the handler in unmapped code.
     Hyprdrive::TerminateLog::install();
 
-    return {Hyprdrive::Compat::NAME, "Mission-control overview + dock for Hyprland", "Vaxry, yayuuu, dragos", SCROLLOVERVIEW_VERSION};
+    return {Hyprdrive::Compat::NAME, "Mission-control overview, Mosaic and window motion for Ryoku", "Vaxry, yayuuu, dragos, Ryoku", SCROLLOVERVIEW_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -859,8 +522,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     Hyprdrive::ShowDesktop::shutdown();
     Hyprdrive::WindowPlacement::shutdown();
     Hyprdrive::OwnSizeTile::shutdown();
-    Hyprdrive::Integration::shutdown(); // its hyprctl lambda lives in this .so
-    Hyprdrive::SettingsApp::shutdown(); // likewise
+    Hyprdrive::Look::shutdown(); // the bridge process, its pipe and timer
+    Hyprdrive::SettingsApp::shutdown(); // its hyprctl handlers live in this .so
     // FIRST: Hyprland hands every mosaic desktop back to its default layout and
     // destroys our algorithm objects -- while their code is still mapped.
     Hyprdrive::Intent::shutdown();
@@ -883,12 +546,6 @@ APICALL EXPORT void PLUGIN_EXIT() {
     }
     SearchBackend::setResultsCallback(nullptr);
     ToolSearch::shutdown();
-    // BEFORE the wake fd below is closed: the reader's worker writes to it when
-    // a job lands, and a job landing after the close would write to a reused fd
-    // (review 2026-09-24).
-    Hyprdrive::Stacks::shutdown();
-    Hyprdrive::StackReader::shutdown();
-    Hyprdrive::Thumbs::shutdown(); // before the wake fd closes: its worker writes to it
     if (g_fileWakeSource) {
         wl_event_source_remove(g_fileWakeSource);
         g_fileWakeSource = nullptr;
@@ -911,7 +568,6 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pMembLateHook.reset();
     g_pMembCloseHook.reset();
     g_pMembKillHook.reset();
-    g_pDockFocusHook.reset();
     g_pMembGoneHook.reset();
     g_pMembPinHook.reset();
     g_pMembFloatHook.reset();
@@ -919,66 +575,44 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pMembClassHook.reset();
     g_pMembWsHook.reset();
     g_pMembFullHook.reset();
-    g_pDockConfigHook.reset();
-    g_pDockHoverHook.reset();
-    g_pDockClickHook.reset();
-    Hyprdrive::DockDrop::shutdown();
-    g_pDockScrollHook.reset();
-    g_pDockRenderHook.reset();
-    g_pDockStandDownHook.reset();
-    g_pDockFsWsHook.reset();
-    g_pDockFsSpecialHook.reset();
-    Hyprdrive::Dock::forgetFullscreenCovers();
-    if (g_pEventLoopManager && g_dockStandDownSeq)
-        g_pEventLoopManager->removeDoLater(g_dockStandDownSeq);
-    g_dockStandDownSeq = 0;
+    g_pConfigHook.reset();
+    g_pPointerMoveHook.reset();
+    g_pPointerButtonHook.reset();
+    g_pDesktopRenderHook.reset();
     g_pScratchExitRenderHook.reset();
     g_pMonitorGoneHook.reset();
     g_pScrollCameraActiveHook.reset();
     g_pScrollCameraMovedHook.reset();
     // The config.preReload listener: HyprlandAPI::reloadConfig() at the end of
-    // this function would otherwise still call into it (clearClickGestures,
-    // the dock key fingerprint) with the plugin half torn down.
+    // this function would otherwise still call into it (clearClickGestures)
+    // with the plugin half torn down.
     g_pClickPreReloadHook.reset();
 
     g_unloading = true;
-    setDockCursor(false);
-    Hyprdrive::Dock::releasePointerFocus();
-    // FIRST: a flight in the air at unload is a window that is hidden, stashed,
-    // or mid-geometry with nothing left to finish it -- the plugin's code IS the
-    // thing that would have landed it. hyprpm reloads this plugin in-process, so
-    // "the session is ending anyway" is not true here.
-    Hyprdrive::Flight::abortAll("plugin-exit");
     // The D-Bus worker outlives the overview otherwise, and hyprpm reloads the
     // plugin in-process.
     AppSearch::shutdownIconIndex();
     SearchProviders::shutdown();
     SearchBackend::shutdown();
-    Hyprdrive::LauncherEntry::stop();
     clearScrollOverviews();
     // AGAIN, after the overviews are gone: their teardown hands focus back and
-    // can queue work (a cursor warp, a flight, a dock-seat refresh) after the
-    // first round of cancels above -- a doLater left in Hyprland's event loop
+    // can queue work (a cursor warp) after the first round of cancels above -- a doLater left in Hyprland's event loop
     // is a call into unloaded code when that loop is destroyed.
     OvInternal::cancelPointerHandoff();
-    Hyprdrive::Flight::abortAll("plugin-exit");
     // Minimized windows sit on special:minimized, which is never shown: with
     // the plugin gone nothing could bring them back (they stayed there until a
-    // reload re-adopted them). After every flight has been settled above, and
-    // before ConfigureHold::flush below, since the restore holds configures.
+    // reload re-adopted them). Before ConfigureHold::flush below, since the
+    // restore holds configures.
     Hyprdrive::Minimize::restoreAllForUnload();
-    // A flying window may hold the flight's blur transformer; its destructor is
+    // A moving window may hold the motion blur's transformer; its destructor is
     // this plugin's code, so it goes before the dlclose (Hyprland's own exit too).
     Hyprdrive::FlightBlur::shutdown();
     // No window may keep a transformer whose code is about to be unmapped.
-    Hyprdrive::Genie::shutdown();
     Hyprdrive::FlightBlur::detachAll();
     OverviewRender::stopIconWarmer();
     // Nothing may stay held once the hook goes with the plugin.
     Hyprdrive::ConfigureHold::flush();
     Hyprdrive::XGeometry::shutdown();
-    Hyprdrive::DockRoom::shutdown();
-    Hyprdrive::Dock::releasePointerFocus();
     // Outlives every overview on purpose (Window.cpp), so it is freed here.
     if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend() : WP<Render::GL::CHyprOpenGLImpl>{})
         OPENGL->makeEGLCurrent();
@@ -992,18 +626,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // into unloaded code, and the textures need the context made current above.
     Hyprdrive::ScratchpadExit::shutdown();
     shutdownClickGestures();
-    // Get Info: its poll timer would fire into unloaded code, and its worker
-    // must be joined (with any package query killed) before the code goes.
-    Hyprdrive::Dock::stopInfoPoll();
-    Hyprdrive::Dock::stopUrgentHopTimer();
-    Hyprdrive::Dock::stopFavoritesWatch();
-    AppInfo::shutdown();
     disableScrollOverviewHooks();
 
     // Before the gesture teardown below: a swipe the plugin is driving ends
     // through it, and the spring timer must not fire into unloaded code.
     Hyprdrive::SpringLoad::shutdown();
-    Hyprdrive::CpuPulse::shutdown();
     Hyprdrive::HotCorner::shutdown();
     Hyprdrive::DesktopSwitch::shutdown();
     Hyprdrive::DebugGesture::shutdown();
@@ -1019,7 +646,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
 
     // LAST, and it is the difference between unloading and killing the session.
     //
-    // The types below are defined IN THIS SHARED OBJECT (OverviewPassElement.hpp, DockTilt.hpp).
+    // The types below are defined IN THIS SHARED OBJECT (OverviewPassElement.hpp).
     // A queued one that outlives the dlclose leaves Hyprland's render pass holding a
     // vtable in freed memory, and the next frame's CRenderPass::clear() runs its
     // destructor through that vtable. `hyprctl plugin unload` SEGV'd the compositor
@@ -1031,18 +658,15 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // before its code goes away. The trackpad gestures above are the same hazard,
     // and clearGestures() is what already answers it for them.
     if (g_pHyprRenderer) {
-        for (const char* TYPE : {"COverviewBlurPassElement", "COverviewSplitBorderPassElement", "COverviewShadowPassElement", "CDockLivePreviewPassElement",
-                                 "CDockTiltPassElement", "CStackBlurPassElement", Hyprdrive::Ripple::PASS_NAME})
+        for (const char* TYPE : {"COverviewBlurPassElement", "COverviewSplitBorderPassElement", "COverviewShadowPassElement", Hyprdrive::Ripple::PASS_NAME})
             g_pHyprRenderer->context().m_pass.removeAllOfType(TYPE);
     }
 
-    // After the purge: nothing queued can reach the tilt shader any more, and
-    // its GL program has to go while this object's code is still mapped.
-    Hyprdrive::DockTilt::shutdown();
-    Hyprdrive::StackBlur::shutdown();
+    // After the purge: the ripple's GL program has to go while this object's
+    // code is still mapped.
     Hyprdrive::Ripple::shutdown();
 
-    // Whatever no module joined (Empty Trash), within the same deadline. No
+    // Whatever no module joined, within the same deadline. No
     // thread of ours may outlive this function in code about to be unmapped.
     Hyprdrive::Workers::finishShutdown();
 

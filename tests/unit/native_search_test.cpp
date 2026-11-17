@@ -25,7 +25,7 @@ int main() {
     // ---- leadingProgram
     CHECK(leadingProgram("loginctl lock-session") == "loginctl");
     CHECK(leadingProgram("  FOO=1 BAR='a b' exec setsid grim -g x") == "grim");
-    CHECK(leadingProgram("omarchy-launch-walker --x; echo") == "omarchy-launch-walker");
+    CHECK(leadingProgram("ryoku-shell lock --x; echo") == "ryoku-shell");
     CHECK(leadingProgram("'/opt/my tools/run' --go") == "/opt/my tools/run");
     CHECK(leadingProgram("uwsm-app -- foot") == "foot");
     CHECK(leadingProgram("env LANG=C kitty") == "kitty");
@@ -45,7 +45,7 @@ int main() {
     };
 
     CHECK(actionRunnable("grim -g x", R));
-    CHECK(!actionRunnable("omarchy-system-lock", R));
+    CHECK(!actionRunnable("no-such-program-lock", R));
     CHECK(actionRunnable("cd ~ && whatever", R)); // syntax we do not model: shown
     CHECK(requirementsMet({"grim"}, R));
     CHECK(!requirementsMet({"grim", "slurp"}, R));

@@ -59,12 +59,6 @@ using namespace Hyprutils::String;
 #include "DebugGesture.hpp"
 #include "ToolSearch.hpp"
 #include "TextInput.hpp"
-#include "StackReader.hpp"
-#include "DockDrop.hpp"
-#include "StackBlur.hpp"
-#include "Thumbs.hpp"
-#include "DockStacks.hpp"
-#include "AppInfo.hpp"
 #include "CursorShape.hpp"
 #include "globals.hpp"
 #include "SearchLetters.hpp"
@@ -83,30 +77,22 @@ using namespace Hyprutils::String;
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 
 #include "Compat.hpp"
-#include "Integration.hpp"
 #include "SettingsApp.hpp"
+#include "Look.hpp"
 #include "AppSearch.hpp"
 #include "SearchBackend.hpp"
 #include "Config.hpp"
-#include "DockTilt.hpp"
-#include "Dock.hpp"
-#include "DockStacks.hpp"
 #include <hyprland/src/layout/LayoutManager.hpp>
 
-#include "FlightController.hpp"
 #include "FlightBlur.hpp"
 #include "Motion.hpp"
 #include "ConfigureHold.hpp"
 #include "XGeometry.hpp"
 #include "FullscreenGuard.hpp"
 #include "SizeAck.hpp"
-#include "CpuPulse.hpp"
-#include "Genie.hpp"
-#include "DockRoom.hpp"
 #include "Scratchpad.hpp"
+#include "InputClaim.hpp"
 #include <hyprland/src/layout/target/Target.hpp>
-#include "DockInput.hpp"
-#include "LauncherEntry.hpp"
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
 #include "Overview.hpp"
@@ -125,6 +111,7 @@ using namespace Hyprutils::String;
 #include "DesktopSwitch.hpp"
 #include "Ripple.hpp"
 #include "BorderFade.hpp"
+#include "FramePump.hpp"
 
 typedef void (*origSendWindowSize)(void*, bool);
 // Declared in OverviewInternal.hpp, which this file does not include.
@@ -164,7 +151,6 @@ namespace PluginDetail {
     extern bool damageFromSurface;
     extern PHLMONITORREF renderingOverviewMonitor;
     extern bool g_scrollOverviewHooksActive;
-    extern bool g_dockCursor;
     extern CFunctionHook* g_pSendWindowSizeHook;
     extern CFunctionHook* g_pShouldRenderWindowHook;
     extern CFunctionHook* g_pTargetPlaceHook;
@@ -185,7 +171,6 @@ namespace PluginDetail {
     extern uint32_t g_tapCtrlPressedAt;
     extern uint32_t g_tapCtrlLastTapMs;
 
-    extern void setDockCursor(bool on);
     extern void hkSendWindowSize(void* thisptr, bool force);
     extern bool hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor);
     extern void hkTargetPlace(void* thisptr, const Layout::STargetBox& box, uint8_t flags);
@@ -219,7 +204,4 @@ namespace PluginDetail {
     extern Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS);
     extern SDispatchResult onDebugDispatcher(std::string arg);
     extern SDispatchResult onGestureDispatcher(std::string arg);
-    extern SDispatchResult onMinimizeDispatcher(std::string arg);
-    extern SDispatchResult onHotkeyDispatcher(std::string arg);
-    extern SDispatchResult onStackDispatcher(std::string arg);
 } // namespace PluginDetail

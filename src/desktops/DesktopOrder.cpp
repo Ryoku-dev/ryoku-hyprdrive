@@ -113,9 +113,7 @@ namespace Hyprdrive::DesktopOrder {
                 done.push_back({WS, Hyprdrive::Compat::id(WS), WS->displayName()});
         if (done.empty())
             return true;
-        // (Omarchy's merged records under the numbers that change are
-        // dropped by its own rule around it: Rows::renumbering.)
-        Rows::renumbering(moves, [&] {
+        [&] {
             for (const auto& [WS, TO] : moves) {
                 const WORKSPACEID FROM = Hyprdrive::Compat::id(WS);
                 if (FROM == TO)
@@ -124,8 +122,8 @@ namespace Hyprdrive::DesktopOrder {
                 if (TO <= 0 || !WS->numberedID())
                     continue;
                 // Not CHLWorkspace::changeID: on 0.57 it posts
-                // changeworkspaceid>>OLD,NEW per desktop, which Omarchy-style
-                // scripts (and the blocks gates) read as a workspace
+                // changeworkspaceid>>OLD,NEW per desktop, which bars and
+                // workspace scripts read as a workspace
                 // renumbering fight. 0.56 wrote the id in place and the bars
                 // got only the destroy/create/workspace burst below; keep that.
                 // Hyprland's own bookkeeping from changeID stays (lifecycle
@@ -141,7 +139,7 @@ namespace Hyprdrive::DesktopOrder {
                 Desktop::History::workspaceTracker()->workspaceIdentityChanged(WS);
                 WS->m_events.idChanged.emit();
             }
-        });
+        }();
         // (Each monitor's "previous workspace" stack holds numbers too, but
         // Hyprland keeps it private: right after a move, "workspace previous"
         // can land on the neighbour of the desktop it meant.)
@@ -205,8 +203,8 @@ namespace Hyprdrive::DesktopOrder {
             rowOf.push_back(Rows::ofWorkspace(WS));
         }
         // ONCE PER ROW: each row's members from its first place. Visitors
-        // (outside their monitor's row) and provisional rows (a monitor
-        // Omarchy has not given a block yet) are left as they are. Blocks
+        // (outside their monitor's row) and provisional rows (a block
+        // only guessed) are left as they are. Blocks
         // off: one row, every desktop -- the plan it always was.
         std::vector<DesktopPlan::Move> PLAN;
         std::vector<bool>              done(ALL.size(), false);

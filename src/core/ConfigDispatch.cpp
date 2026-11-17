@@ -57,50 +57,6 @@ SDispatcher* findDispatcher(const std::string_view name) {
             },
         },
         {
-            .name            = "minimize",
-            .argPattern      = std::regex{"^(window|restore)$"},
-            .defaultArg      = "window",
-            .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
-            .invalidArgError = "expected one of: window, restore",
-            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "minimize"); },
-            .luaLegacy       = [](lua_State* L) {
-                Hyprdrive::Compat::noteLegacyUse(Hyprdrive::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.minimize");
-                return dispatcherFactoryLua(L, "minimize");
-            },
-        },
-        {
-            // X34. `1`..`10` are the reference's SLOT numbers, not the digits on
-            // the keys -- `<Super>0` is the tenth app and so binds `10`. One
-            // dispatcher for all thirty accelerators, because the reference has
-            // one callback for all thirty and the modifier is an argument to it.
-            .name            = "hotkey",
-            .argPattern      = std::regex{"^(overlay|((shift|ctrl) )?([1-9]|10))$"},
-            .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected overlay, or 1-10 optionally prefixed with 'shift ' or 'ctrl '",
-            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "hotkey"); },
-            .luaLegacy       = [](lua_State* L) {
-                Hyprdrive::Compat::noteLegacyUse(Hyprdrive::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.hotkey");
-                return dispatcherFactoryLua(L, "hotkey");
-            },
-        },
-        {
-            // V11 V4. The path is the tail of the argument and is deliberately
-            // NOT constrained: a stack is any path the user has, and a pattern
-            // strict enough to be worth writing would reject the ones with
-            // spaces, brackets or non-ASCII in them. The VERB is checked here;
-            // the path is checked by the filesystem, which is the only thing
-            // that can actually answer.
-            .name            = "stack",
-            .argPattern      = std::regex{"^(clear|(pin|unpin|toggle|open) .+|view (fan|grid|auto) .+|sort (name|mtime|added|modified|kind) .+|scroll -?[0-9]+|filter( .*)?)$"},
-            .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: pin <path> | unpin <path> | toggle <path> | open <path> | view auto|fan|grid <path> | sort name|added|modified|kind <path> | scroll <rows> | filter [text] | clear",
-            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "stack"); },
-            .luaLegacy       = [](lua_State* L) {
-                Hyprdrive::Compat::noteLegacyUse(Hyprdrive::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.stack");
-                return dispatcherFactoryLua(L, "stack");
-            },
-        },
-        {
             // A diagnostic, and in the table for the same reason the rest are:
             // a Lua config reaches dispatchers ONLY through these bindings, so
             // one that is not here cannot be called at all (user, 2026-09-19:
@@ -108,10 +64,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .name            = "debug",
             // `gesture .+`: the script is parsed by the topic itself
             // (DebugGestureScript.hpp), which reports a bad step precisely.
-            .argPattern      = std::regex{"^(frames|mem|motion|lockstate|exclusive|windows|glass|desktop|rows|dockmenu|stripclean|scratchpad|type|type \\S+|activate \\S+|movehere \\S+|tile \\S+|drawn \\S+|probe_draw (on|self|off)|xgeom|hooks|identity|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
+            .argPattern      = std::regex{"^(frames|mem|motion|lockstate|exclusive|windows|desktop|rows|stripclean|scratchpad|type|type \\S+|tile \\S+|drawn \\S+|probe_draw (on|self|off)|xgeom|hooks|identity|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: frames | mem | motion | lockstate | exclusive | desktop | rows | dockmenu | stripclean | identity | scratchpad | type [text] | activate <class> | movehere <class> | tile <class> | drawn <class> | probe_draw on|self|off | press <keycode> | ripple [x y] | gesture <script>|state|stop",
+            .invalidArgError = "expected: frames | mem | motion | lockstate | exclusive | desktop | rows | stripclean | identity | scratchpad | type [text] | tile <class> | drawn <class> | probe_draw on|self|off | press <keycode> | ripple [x y] | gesture <script>|state|stop",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
             .luaLegacy       = [](lua_State* L) {
                 Hyprdrive::Compat::noteLegacyUse(Hyprdrive::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");
@@ -442,12 +398,8 @@ void registerLuaFunctions() {
 
     HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "_dispatch", ::runDispatcherActionLua);
     HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "configure", ::configureLua);
-    // hl.plugin.hyprdrive.integration() -> "omarchy"|"none", reason. New name
-    // only: nothing written for the old namespace ever asked it.
-    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "integration", Integration::luaIntegration);
-    // hl.plugin.hyprdrive.workspace_blocks(slots): Omarchy's per-monitor
-    // workspace blocks are on (slots > 0) or off (0); 00-plugin.lua says it
-    // on every parse (Rows.hpp).
+    // hl.plugin.hyprdrive.workspace_blocks(slots): the size of a desktop
+    // block, Ryoku's ten by default; 0 turns blocks off (Rows.hpp).
     HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "workspace_blocks", Rows::luaWorkspaceBlocks);
 
     // ONE RELEASE. `configure` under the old namespace still writes the NEW

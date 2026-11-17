@@ -12,7 +12,8 @@
 #include "MotionTween.hpp"
 
 #include "Config.hpp"
-#include "Dock.hpp"
+#include "Scratchpad.hpp"
+#include "Look.hpp"
 #include "IOverview.hpp"
 #include "Minimize.hpp"
 #include "OverviewRender.hpp"
@@ -238,7 +239,7 @@ void setSuperHeld(bool held) {
     // ASK FOR THE FIRST FRAME. SUPER arrives with no pointer event attached, on
     // a desktop where nothing else is repainting -- and inside an overview whose
     // scheduleFrame hook throttles plain damage, so there it has to be asked the
-    // overview's way. Dock::needsFrames sustains the chain from here.
+    // overview's way. FramePump sustains the chain from here.
     for (const auto& MONITOR : State::monitorState()->monitors()) {
         if (!MONITOR)
             continue;
@@ -321,23 +322,16 @@ void render(PHLMONITOR monitor, const CBox& frame, float scale, float alpha) {
         return;
 
     const float S     = std::max(scale, 0.01F);
-    const int   ROUND = sc<int>(std::round(PILL.h / 2.0));
+    const float POWER = Config::chromeCornerPower();
+    const int   ROUND = sc<int>(std::round(std::min<double>(Config::chromeCorner(Look::current().cuts.menu, PILL.w / S, PILL.h / S) * S, PILL.h / 2.0)));
 
-    // THE SAME GLASS THE DOCK WEARS, through the dock's own call: live
-    // dual-kawase of whatever is behind it, inheriting decoration:blur:* through
-    // the -1 sentinels (X71) unless the dock keys override them. Frost is on by
-    // default on every surface in this rice, and a second frost implementation
-    // is a second thing to re-theme.
-    Dock::frostedPlate(monitor, PILL, ROUND, A);
+    // An overlay plane with its hairline, as the Hub's popovers are.
+    OverviewRender::themePlate(PILL, ROUND, POWER, A, false);
 
-    // The BUTTONS are X55's close-X three times over, and the treatment is
-    // copied rather than improved on for a reason it already records: the
-    // symbolic glyphs ship as near-black artwork, this render path cannot
-    // recolour a texture, and the plate's hue is whatever the theme made it
-    // (matugen fills dock:background_color, which is a LIGHT grey by default and
-    // a dark one under some wallpapers). A light disc under a dark glyph is the
-    // one combination that stays legible whichever way the theme goes.
+    // Each button a tonal plaque (field) under its symbolic glyph, which ships
+    // near-black: drawn white on a dark look, as it is on a light one.
     const char* const ICONS[3] = {ICON_MINIMIZE, ICON_MAXIMIZE, ICON_CLOSE};
+    const bool        WHITE    = !Config::isLightTheme();
 
     for (int i = 0; i < 3; ++i) {
         const auto  C = buttonCentre(PILL, S, i);
@@ -345,12 +339,12 @@ void render(PHLMONITOR monitor, const CBox& frame, float scale, float alpha) {
 
         CRectPassElement::SRectData disc;
         disc.box           = CBox{C.x - D / 2.0, C.y - D / 2.0, D, D};
-        disc.color         = CHyprColor{0.93F, 0.93F, 0.93F, 0.95F * A};
-        disc.round         = sc<int>(std::round(D / 2.0));
-        disc.roundingPower = 2.F;
+        disc.color         = Look::current().roles.field.modifyA(A);
+        disc.round         = sc<int>(std::round(std::min<double>(Config::chromeCorner(Look::current().cuts.token, D / S, D / S) * S, D / 2.0)));
+        disc.roundingPower = POWER;
         g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(disc));
 
-        if (const auto TEX = OverviewRender::appIcon(ICONS[i])) {
+        if (const auto TEX = OverviewRender::appIcon(ICONS[i], WHITE)) {
             const float SIDE = D * GLYPH;
 
             CTexPassElement::SRenderData glyph;
@@ -379,11 +373,10 @@ void activate(PHLMONITOR monitor, const PHLWINDOW& window, EButton button) {
 
     switch (button) {
         case EButton::Minimize:
-            // X54's law: everything that minimizes goes through the dock, or it
-            // teleports instead of flying. The dock is the target, so the dock
-            // owns the animation. No bounce -- Y8 hangs that off a DROP, and a
-            // button press is its own acknowledgement.
-            Dock::minimizeWithFlight(monitor ? monitor : window->m_monitor.lock(), window);
+            // Put away into Ryoku's scratchpad, where Super+H puts a window
+            // and Super+Alt+H brings it back.
+            if (const auto SCRATCH = Scratchpad::ensureDefault(monitor ? monitor : window->m_monitor.lock()))
+                Scratchpad::moveWindowTo(window, SCRATCH);
             return;
 
         case EButton::Maximize:
@@ -414,8 +407,8 @@ void activate(PHLMONITOR monitor, const PHLWINDOW& window, EButton button) {
 
 // ---------------------------------------------------------------- desktop ----
 
-DockInput::SClaim handleDesktop(PHLMONITOR monitor, const Vector2D& local, uint32_t button, bool pressed) {
-    DockInput::SClaim out;
+Input::SClaim handleDesktop(PHLMONITOR monitor, const Vector2D& local, uint32_t button, bool pressed) {
+    Input::SClaim out;
 
     if (button != BTN_LEFT)
         return out;

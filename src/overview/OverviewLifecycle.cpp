@@ -111,7 +111,6 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITOR monitor_) 
     applyWorkspaceAnimationOverrides();
     if (sharedStateOwner)
         forceWorkspaceAlphaVisible();
-    Hyprdrive::Dock::releasePointerFocus();
     // A zoomed-out canvas ends here: its presses would be ours too.
     Hyprdrive::Mosaic::onOverviewOpen();
     applyInputConfigOverrides();
@@ -288,8 +287,6 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITOR monitor_) 
     // the others open after the keyboard is gone and would read the same one.
     if (scrollOverviews().size() <= 1)
         OvInternal::g_focusAtOpen = Desktop::focusState()->window();
-    Hyprdrive::Stacks::traceEvent(std::format("locks: open on {} (overviews={}) focusAtOpen={}", pMonitor ? pMonitor->m_name : "?", scrollOverviews().size(),
-                                                   OvInternal::g_focusAtOpen.lock() ? OvInternal::g_focusAtOpen->metadata().appID() : "-"));
     rememberSelection(Desktop::focusState()->window());
     viewportCurrentWorkspace = activeWorkspaceIndex();
     syncSelectionToViewport();
@@ -332,17 +329,6 @@ void COverview::close() {
         s_closingAll = false;
     }
 
-    // X28. The pill only exists while the overview does, so its menu must go
-    // with it -- otherwise a stale plate is still holding every pointer press
-    // the next time the overview opens.
-    Hyprdrive::Dock::closeMenu();
-
-    // X32/G12. Same reasoning for both drags: the overview can close under a
-    // held button (Escape, a keybind, a window taking focus), and the release
-    // that would have ended the gesture then never reaches this hook. Neither
-    // may survive into the next open as a phantom drop.
-    Hyprdrive::Dock::dragCancel();
-    Hyprdrive::Dock::setForeignInsert(-1);
     SearchBackend::closeSushi();
 
     // Click-to-close and swipe-commit never go through the dispatcher, so a
@@ -433,17 +419,15 @@ void COverview::close() {
     // the window's restored rect -- which is exactly the restore the eye
     // expects, without a second flight fighting the close for the same 300ms.
     //
-    // Minimize::restore is the house's ONE answer to "something named a
-    // minimized window and asked to go to it" -- Dock::activateWindow, the X28
-    // menu's window rows and the hover panel's click all call it, with the same
-    // note that a stashed window is restored rather than selected because the
-    // stash owns no card to land a selection on. This is the fourth caller, not
-    // a fourth answer.
+    // Minimize::restore is the one answer to "something named a minimized
+    // window and asked to go to it": the stash owns no card to land a
+    // selection on.
     if (closeOnWindow && Hyprdrive::Minimize::isMinimized(closeOnWindow.lock()))
         Hyprdrive::Minimize::restore(closeOnWindow.lock());
 
-    // The pick is a tiled window a fullscreen GAME covers: the game goes to the
-    // dock, still fullscreen, before the pick is focused (fullscreenCoverOf).
+    // The pick is a tiled window a fullscreen GAME covers: the game is put away,
+    // still fullscreen, before the pick is focused (fullscreenCoverOf); the
+    // overview brings it back.
     // Any other cover -- a video in the browser -- Hyprland takes out of
     // fullscreen as the pick is focused (user, 2026-10-29: "browser minimizes
     // itself instead of the video exiting fullscreen").
@@ -1213,13 +1197,6 @@ void OvInternal::releasePointerLocks() {
     // held the pointer still under the overview (user, 2026-09-27: Moonlight).
     if (!g_pInputManager)
         return;
-    int active = 0;
-    for (const auto& c : g_pInputManager->m_constraints)
-        if (const auto C = c.lock(); C && C->isActive())
-            ++active;
-    if (active)
-        Hyprdrive::Stacks::traceEvent(std::format("locks: release {} (overviews={} closing0={})", active, scrollOverviews().size(),
-                                                       scrollOverviews().empty() || !scrollOverviews().front() ? -1 : (int)scrollOverviews().front()->isClosing()));
     g_pInputManager->unconstrainMouse();
 }
 
@@ -1418,7 +1395,6 @@ void OvInternal::handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResou
     // overview over a game) gives it the lock back.
     if (const auto HLSURF = surface ? Desktop::View::CWLSurface::fromResource(surface) : nullptr; HLSURF && HLSURF->constraint()) {
         HLSURF->constraint()->activate();
-        Hyprdrive::Stacks::traceEvent(std::format("locks: handed back to {} active={}", window->metadata().appID(), HLSURF->constraint()->isActive() ? 1 : 0));
         return;
     }
 
@@ -1440,15 +1416,8 @@ void OvInternal::handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResou
         const CBox BOX{FINAL->m_realPosition->goal(), FINAL->m_realSize->goal()};
         if (BOX.width < 1 || BOX.height < 1 || (!CENTRE && BOX.containsPoint(g_pInputManager->getMouseCoordsInternal())))
             return;
-        Hyprdrive::Stacks::traceEvent(std::format("locks: warp into {}", FINAL->metadata().appID()));
         Pointer::pointerController()->warpTo(BOX.middle(), true);
     });
-}
-
-void OvInternal::traceHandback(const char* who, const PHLWINDOW& asked, const PHLWINDOW& target, const PHLWINDOW& before) {
-    const auto NAME = [](const PHLWINDOW& w) { return w ? w->metadata().appID() : std::string{"-"}; };
-    Hyprdrive::Stacks::traceEvent(std::format("locks: handback {} asked={} target={} before={} after={}", who, NAME(asked), NAME(target), NAME(before),
-                                                   NAME(Desktop::focusState()->window())));
 }
 
 Hyprdrive::DesktopTape::STape Hyprdrive::DesktopTape::probe(const PHLWORKSPACE& workspace) {

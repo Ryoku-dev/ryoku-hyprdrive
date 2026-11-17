@@ -1,13 +1,8 @@
 #pragma once
 
-// THE SEARCH ON PLAIN HYPRLAND (native port P1-4/5, docs/native/OMARCHY-AUDIT.md
-// A4-A11). With Integration::omarchy() the search is exactly what it always
-// was: Omarchy's menu, `omarchy-launch-tui` agents, the agents plugins' usage
-// files, Omarchy's default-agent file. Without it, that machinery is either
-// missing or someone else's, and every row it produced did nothing when
-// activated (`bash -c omarchy-system-lock` -> "command not found", silently).
-// This header is the part of the replacement that has no state and no
-// Hyprland in it, so tests/unit/native_search_test.cpp checks it on the host:
+// THE SEARCH'S OWN ROWS: every row is one that does something when activated.
+// This header is the part that has no state and no Hyprland in it, so
+// tests/unit/native_search_test.cpp checks it on the host:
 //
 //   * which program a name resolves to (PATH, then ~/.local/bin -- where most
 //     agent CLIs install themselves and where a display manager's PATH often
@@ -252,21 +247,14 @@ namespace Hyprdrive::NativeSearch {
         std::vector<std::string> aliases;
     };
 
-    // The screenshot lands in XDG_PICTURES_DIR (or ~/Pictures), and on the
-    // clipboard too when wl-copy is there. The full-screen one waits for the
-    // overview's close animation (~0.2 s) or it photographs the overview.
+    // Ryoku's own commands: the lock screen, Ryoshot (which waits out the
+    // overview's close itself), Ryoku Settings. Power goes through systemd.
     inline const std::vector<SSystemRow>& systemRows() {
         static const std::vector<SSystemRow> ROWS = {
-            {"system.lock", "Lock Screen", "system-lock-screen", "loginctl lock-session", "loginctl lock-session", {"loginctl"}, {"lock"}},
-            {"system.screenshot-region", "Screenshot Region", "applets-screenshooter", "Select an area with slurp, save with grim",
-             "d=\"$(xdg-user-dir PICTURES 2>/dev/null || echo \"$HOME/Pictures\")\"; mkdir -p \"$d\"; f=\"$d/screenshot-$(date +%Y%m%d-%H%M%S).png\"; "
-             "g=\"$(slurp)\" || exit 0; grim -g \"$g\" \"$f\" && { command -v wl-copy >/dev/null && wl-copy < \"$f\"; "
-             "command -v notify-send >/dev/null && notify-send -i \"$f\" 'Screenshot saved' \"$f\"; }",
-             {"grim", "slurp"}, {"capture", "screen shot", "print"}},
-            {"system.screenshot", "Screenshot Screen", "applets-screenshooter", "Every output, saved with grim",
-             "d=\"$(xdg-user-dir PICTURES 2>/dev/null || echo \"$HOME/Pictures\")\"; sleep 0.4; mkdir -p \"$d\"; f=\"$d/screenshot-$(date +%Y%m%d-%H%M%S).png\"; "
-             "grim \"$f\" && { command -v wl-copy >/dev/null && wl-copy < \"$f\"; command -v notify-send >/dev/null && notify-send -i \"$f\" 'Screenshot saved' \"$f\"; }",
-             {"grim"}, {"capture", "screen shot", "print"}},
+            {"system.lock", "Lock Screen", "system-lock-screen", "Lock the screen", "ryoku-shell lock", {"ryoku-shell"}, {"lock"}},
+            {"system.screenshot", "Screenshot", "applets-screenshooter", "Capture, annotate and beautify with Ryoshot", "ryoku-cmd-ryoshot", {"ryoku-cmd-ryoshot"},
+             {"capture", "screen shot", "print", "ryoshot"}},
+            {"system.settings", "Settings", "preferences-system", "Open Ryoku Settings", "ryoku-shell settings", {"ryoku-shell"}, {"preferences", "hub"}},
             {"system.suspend", "Suspend", "system-suspend", "systemctl suspend", "systemctl suspend", {"systemctl"}, {"sleep"}},
             {"system.reboot", "Restart", "system-reboot", "systemctl reboot", "systemctl reboot", {"systemctl"}, {"reboot"}},
             {"system.poweroff", "Shut Down", "system-shutdown", "systemctl poweroff", "systemctl poweroff", {"systemctl"}, {"power off", "poweroff"}},

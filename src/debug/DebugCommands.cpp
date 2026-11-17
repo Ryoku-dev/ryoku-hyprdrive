@@ -34,22 +34,6 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         // A report rides on .error like every other topic's (see above).
         return {.success = false, .error = OUT};
     }
-    // `activate <class>`: exactly a left click on that app's dock icon, for the
-    // nested test rig (whose dock no real pointer can reach).
-    if (TOPIC == "activate") {
-        const std::string CLASS = data.size() > 1 ? std::string{data[1]} : std::string{};
-        if (!Hyprdrive::Dock::debugActivate(Desktop::focusState()->monitor(), CLASS))
-            return {.success = false, .error = std::format("hyprdrive:debug activate: no dock item for class {}", CLASS)};
-        return {};
-    }
-    // `movehere <class>`: the dock menu's "Move to this workspace" on that
-    // app's window, to the focused monitor's desktop.
-    if (TOPIC == "movehere") {
-        const std::string CLASS = data.size() > 1 ? std::string{data[1]} : std::string{};
-        if (!Hyprdrive::Dock::debugMoveHere(Desktop::focusState()->monitor(), CLASS))
-            return {.success = false, .error = std::format("hyprdrive:debug movehere: no window of class {}", CLASS)};
-        return {};
-    }
     // `tile <class>`: where that app's window is drawn in the focused
     // monitor's open overview (monitor-local render px), so a test clicks it
     // with a real pointer instead of guessing at a screenshot.
@@ -170,23 +154,14 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     // one here is not reaching the animations.
     // `desktop`: Super+scroll's and the per-cause animation toggles' state --
     // what caused the last desktop switch, and whether it snapped.
-    // `dockmenu`: the dock's hover pane cells and its open menu's row boxes.
     // `stripclean`: the overview strip's Clean Up button (box, state, bump).
     if (TOPIC == "stripclean")
         return {.success = false, .error = overviewStripCleanupReport(nullptr)};
-    if (TOPIC == "dockmenu")
-        return {.success = false, .error = Hyprdrive::Dock::debugMenuReport(Desktop::focusState()->monitor())};
     if (TOPIC == "desktop")
         return {.success = false, .error = Hyprdrive::DesktopSwitch::debugReport()};
-    // `rows`: each monitor's row of desktops -- Omarchy's workspace blocks on
-    // or off, the block file as read, guests and stale records, members and visitors.
+    // `rows`: each monitor's row of desktops -- workspace blocks on or off, members and visitors.
     if (TOPIC == "rows")
         return {.success = false, .error = Hyprdrive::Rows::debugReport()};
-    if (TOPIC == "glass") {
-        const auto C = Hyprdrive::Config::dockBackgroundColor();
-        return {.success = false, .error = std::format("hyprdrive glass: tint #{:02x}{:02x}{:02x} alpha {:.3f}", sc<int>(std::round(C.r * 255)), sc<int>(std::round(C.g * 255)),
-                                                       sc<int>(std::round(C.b * 255)), C.a)};
-    }
     if (TOPIC == "windows")
         return {.success = false, .error = Hyprdrive::SizeAck::report()};
     if (TOPIC == "motion") {
@@ -195,7 +170,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         return {.success = false,
                 .error   = std::format("hyprdrive motion: house={} decel(.25)={:.3f} decel(.5)={:.3f} accel(.5)={:.3f} pop(.5)={:.3f} | blur minimize {:.3f}@.25 swipe {:.3f}@.25",
                                        Hyprdrive::Motion::housePreset(), E(ERole::DECEL, 0.25F), E(ERole::DECEL, 0.5F), E(ERole::ACCEL, 0.5F), E(ERole::POP, 0.5F),
-                                       Hyprdrive::FlightBlur::amount(Hyprdrive::FlightBlur::ESite::MINIMIZE, 0.25F),
+                                       Hyprdrive::FlightBlur::amount(Hyprdrive::FlightBlur::ESite::LAYOUT, 0.25F),
                                        Hyprdrive::FlightBlur::amount(Hyprdrive::FlightBlur::ESite::SWIPE, 0.25F)) +
                        // Per blur site since the last `motion` read (which resets them):
                        // asked / smeared / drawn, trail length, shutter (FlightBlur.hpp).
@@ -284,8 +259,8 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         }
 
         std::string line = "\n  " + monitor->m_name + " [desktop]";
-        if (const auto DOCK = Hyprdrive::Dock::frameReason(monitor))
-            line += std::string(" dock:") + DOCK;
+        if (const auto REASON = Hyprdrive::FramePump::reason(monitor))
+            line += std::string(" ") + REASON;
         else
             line += " idle";
         report += line;

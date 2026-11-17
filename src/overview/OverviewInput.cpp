@@ -1,8 +1,5 @@
 #include <hyprland/src/keybinds/Manager.hpp>
-#include "Integration.hpp"
 #include "OverviewInternal.hpp"
-#include "DockInput.hpp"
-#include "DockStacks.hpp"
 #include "DesktopSwitch.hpp"
 #include "HoverTarget.hpp"
 using namespace OvInternal; // opted in here rather than leaked from the header
@@ -73,25 +70,6 @@ void COverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
             }
         }
 
-        // The dock's hover highlight is the only thing on screen that changes on
-        // a bare pointer move over an otherwise idle overview: no tile hover
-        // changes there, so nothing else asks for a frame and the highlight would
-        // simply never appear (measured -- the two captures differed by 490 px,
-        // all of them the cursor plane). A plain damageMonitor is not enough
-        // either: hkScheduleFrame throttles AQ_SCHEDULE_DAMAGE for as long as an
-        // overview is open, so the frame has to be asked for the overview's way.
-        if (Hyprdrive::Dock::damageIfChanged(pMonitor.lock())) {
-            damage();
-            requestInputFrame();
-        }
-
-        // X32. The dock's drag lives in the dock; the overview only forwards the
-        // motion, exactly as it forwards the button edges.
-        if (Hyprdrive::Dock::dragPending() && Hyprdrive::Dock::dragMove(pMonitor.lock(), lastMousePosLocal)) {
-            damage();
-            requestInputFrame();
-        }
-
         // G12. The hold has to pass BEFORE the distance is even looked at.
         if (g_search.pointer.drag && !g_search.pointer.drag->desktopId.empty()) {
             if (!g_search.pointer.drag->live) {
@@ -100,12 +78,6 @@ void COverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
                     g_search.pointer.drag->live = true;
             }
 
-            if (g_search.pointer.drag->live) {
-                const auto MON = pMonitor.lock();
-                Hyprdrive::Dock::setForeignInsert(Hyprdrive::Dock::showAppsContains(MON, lastMousePosLocal) ? -1 : Hyprdrive::Dock::dropIndexAt(MON, lastMousePosLocal));
-                damage();
-                requestInputFrame();
-            }
         }
 
         const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
@@ -354,26 +326,6 @@ void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo
             return WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{};
         };
 
-        // The dock's menu and middle-launch, ahead of every overview gesture:
-        // both float over the main area exactly as the pill does. Same ladder the
-        // plain desktop runs -- it lives in DockInput. The overview honours the
-        // left-handed config (its resize button is the menu), never lets a menu
-        // miss through (it always draws), and keeps the dock out of a window drag.
-        {
-            const auto DOCKMONITOR = pMonitor.lock();
-            const auto DOCKPOINT   = getOverviewMousePosLocal(DOCKMONITOR);
-            const bool PRESSED     = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
-            const auto ROLE        = event.button == RESIZE_BUTTON ? Hyprdrive::DockInput::EButton::Menu
-                                   : event.button == BTN_MIDDLE    ? Hyprdrive::DockInput::EButton::Launch
-                                   : event.button == MAIN_BUTTON   ? Hyprdrive::DockInput::EButton::Main
-                                                                   : Hyprdrive::DockInput::EButton::Other;
-
-            if (Hyprdrive::DockInput::handleMenu(DOCKMONITOR, DOCKPOINT, ROLE, PRESSED, static_cast<bool>(drag.activeWindow), false).claimed) {
-                lastMousePosLocal = DOCKPOINT;
-                return;
-            }
-        }
-
         if (event.button == MAIN_BUTTON) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
@@ -386,40 +338,16 @@ void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo
             if (!drag.activeWindow && deskDragButton(event.state == WL_POINTER_BUTTON_STATE_PRESSED))
                 return;
 
-            // X24 dock-side, in the overview. The pill is pinned here (§10
-            // clause 6) and floats OVER the main area, so without this the tile
-            // underneath takes the press and the click selects a window instead
-            // of minimizing one. Both edges are eaten: returning on the press
-            // alone would leave the release to performPrimaryClickAction().
-            //
-            // ...but NOT while a window drag is in flight. X26 drops a dragged
-            // window on this same pill, and eating that release stranded the
-            // drag: endWindowDrag() never ran, so its OVERDOCK branch never
-            // minimized anything and the proxy stayed on screen mid-gesture.
-            // A drag release belongs to the drag, whatever it is released over.
-            // G12. A result drag ends wherever it is released, and it is the
-            // FIRST thing the release is offered to: the dock branch below
-            // would otherwise read the drop as a click on the icon under it.
-            // On the pill it pins, on Show Applications it unpins, and anywhere
-            // else -- including on another result -- it is rejected outright,
-            // which is what "must not create a folder or reorder anything" is.
+            // A press on a result ends with its release. A hold that went
+            // somewhere is dropped; a click activates the row it began on.
             if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_search.pointer.drag) {
                 const auto DRAG = *g_search.pointer.drag;
                 g_search.pointer.drag.reset();
-                Hyprdrive::Dock::setForeignInsert(-1);
                 damage();
                 requestInputFrame();
 
-                if (DRAG.live && !DRAG.desktopId.empty()) {
-                    const auto MON = pMonitor.lock();
-                    // The button sits INSIDE the pill, so it has to be asked
-                    // first or the drop index would claim it.
-                    if (Hyprdrive::Dock::showAppsContains(MON, lastMousePosLocal))
-                        Hyprdrive::Dock::unpin(DRAG.desktopId);
-                    else if (const int INDEX = Hyprdrive::Dock::dropIndexAt(MON, lastMousePosLocal); INDEX >= 0)
-                        Hyprdrive::Dock::pinAt(DRAG.desktopId, INDEX);
+                if (DRAG.live && !DRAG.desktopId.empty())
                     return;
-                }
 
                 // X62. The hold never completed, so this was a CLICK. Released
                 // over the row it was pressed on, it activates exactly as Return
@@ -439,21 +367,6 @@ void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo
 
             if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && std::exchange(g_search.pointer.uiPress, false))
                 return;
-
-            // The pill's own gestures: hover panel > pill drag/click > off-pill
-            // cancel. Behind the result-drag release above -- a dropped result
-            // sits inside the pill and is offered first -- and behind the
-            // window-drag guard. Same dock the plain desktop drives; the ladder
-            // and the reasons for its order live in DockInput.
-            if (const auto CLAIM = Hyprdrive::DockInput::handlePill(pMonitor.lock(), lastMousePosLocal, Hyprdrive::DockInput::EButton::Main,
-                                                         event.state == WL_POINTER_BUTTON_STATE_PRESSED, static_cast<bool>(drag.activeWindow));
-                CLAIM.claimed) {
-                if (CLAIM.needsFrame) {
-                    damage();
-                    requestInputFrame();
-                }
-                return;
-            }
 
             // G12. A press over a result belongs to the panel, which floats over
             // the grid exactly as the pill does. Nothing happens yet: only the
@@ -691,17 +604,6 @@ void COverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& info) 
 
         info.cancelled = true;
 
-        // A dock stack's grid pane scrolls under the wheel here too (user,
-        // 2026-09-30): the desktop's dock scroll hook skips overview monitors,
-        // so the pane never saw a tick while the overview was up.
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            Hyprdrive::Stacks::noteAxis(e.delta, e.source == WL_POINTER_AXIS_SOURCE_WHEEL);
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0 &&
-            Hyprdrive::Stacks::scroll(pMonitor.lock(), getOverviewMousePosLocal(pMonitor.lock()), e.delta < 0.0))
-            return;
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0 &&
-            Hyprdrive::Dock::menuScroll(pMonitor.lock(), getOverviewMousePosLocal(pMonitor.lock()), e.delta < 0.0))
-            return;
 
         const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? Hyprdrive::Config::getHorizontalScrollAction(layout) :
                                                                           Hyprdrive::Config::getVerticalScrollAction(layout);
@@ -853,7 +755,7 @@ void COverview::onWorkspaceLifecycle(PHLWORKSPACEREF) {
 // no close bind and SUPER+W is not theirs for something else.
 static bool isOverviewCloseChord(xkb_keysym_t keysym, Input::ModifierMask mods) {
     const bool SUPERW = (keysym == XKB_KEY_w || keysym == XKB_KEY_W) && mods == Input::ModifierMask{HL_MODIFIER_META};
-    if (Hyprdrive::Integration::omarchy() || !Keybinds::mgr())
+    if (!Keybinds::mgr())
         return SUPERW;
     const auto LOWER = [](std::string t) {
         std::ranges::transform(t, t.begin(), [](unsigned char c) { return std::tolower(c); });

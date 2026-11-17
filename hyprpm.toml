@@ -1,44 +1,16 @@
-# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-0.57`
-# (this branch is the Hyprland 0.57 line; for Hyprland 0.56 add
-# origin/hyprland-native instead)
-# (hyprpm's second argument is a git revision for `git reset --hard` in a fresh
-# clone, so a branch other than the default one needs its origin/ name).
-#
-# NATIVE: one build for plain Hyprland and Omarchy alike (Integration.hpp
-# decides at runtime). hyprpm builds the .so and copies nothing else, so the .so
-# carries what it needs (the scratchpad glyph is #embed-ded). What hyprpm cannot
-# install is the Lua fragments -- the overview submap and the 3-finger gestures;
-# Super tap and the dock work without them. For those, from a checkout:
-#     make install        (fragments + loader + one require line in hyprland.lua)
-# 00-plugin.lua finds hyprpm's copy at /var/cache/hyprpm/$USER/Hyprdrive/.
-#
-# BUILD = the .so plus symcheck (nm/ldd only): an undefined symbol is a
-# lazy-bind compositor kill, so it is never optional. Not `make all`: that also
-# runs the host tests and python checks, which need -devel packages and python
-# modules a hyprpm user has no reason to have.
-#
-# COMMIT PINS map a Hyprland commit to the plugin commit that builds against it,
-# for users on an OLDER Hyprland than this branch's HEAD targets. HEAD targets
-# 0.57.2 (11cbc6c577b84ffb1edf4df3fc5b6128c3ae6947) itself, so it has no pin:
-# pinning the current version would freeze every 0.57.2 user at one commit and
-# hide every fix after it. Hyprland 0.56.2 gets no pin here either: its line
-# is the hyprland-native branch, which keeps receiving fixes, and a pin would
-# freeze 0.56.2 users at one of its commits. Built on 0.56.2, this branch stops
-# at `make` (scripts/prereqs.sh, exit 3) and names hyprland-native. When HEAD
-# moves to the next Hyprland, add
-#     ["11cbc6c577b84ffb1edf4df3fc5b6128c3ae6947", "<last commit built on 0.57.2>"]
-# to commit_pins below.
+# The build recipe `ryoku-hub desktop plugins rebuild` runs on a checkout or a
+# packaged box, in the format hyprpm reads. The plugin lives in the Ryoku
+# monorepo, so it tracks the Hyprland the repo ships and carries no commit pins.
+# The look bridge (look/) is built by the package, not here: the plugin finds
+# it on PATH.
 
 [repository]
-name = "Hyprdrive"
-authors = ["dragos"]
+name = "ryoku-hyprdrive"
+authors = ["Ryoku", "dragos", "yayuuu"]
+description = "Mission-control overview, Mosaic and window motion for Ryoku"
 commit_pins = []
 
 [hyprdrive]
-description = "Hyprdrive: mission-control overview, workspace strip, search and dock for Hyprland (Omarchy-aware)."
-authors = ["dragos", "yayuuu"]
+description = "Mission-control overview, Mosaic and window motion"
 output = "hyprdrive.so"
-build = [
-    "make hyprdrive.so",
-    "bash scripts/symcheck.sh",
-]
+build = ["make hyprdrive.so"]
