@@ -1,8 +1,7 @@
-# The build recipe `ryoku-hub desktop plugins rebuild` runs on a checkout or a
-# packaged box, in the format hyprpm reads. The plugin lives in the Ryoku
-# monorepo, so it tracks the Hyprland the repo ships and carries no commit pins.
-# The look bridge (look/) is built by the package, not here: the plugin finds
-# it on PATH.
+# The build recipe `ryoku-hub desktop plugins rebuild` runs, in the format hyprpm
+# reads. Ryoku builds this repository's ryoku branch, which tracks the Hyprland
+# Ryoku ships, so it carries no commit pins. The look bridge (look/) is built by
+# the package (`make look`), not here: the plugin finds it on PATH.
 
 [repository]
 name = "ryoku-hyprdrive"

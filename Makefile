@@ -34,7 +34,7 @@ endif
 VERSION_HEADER = build/PluginVersion.hpp
 VERSION_SCRIPT = scripts/generate-plugin-version.sh
 
-.PHONY: all check clean FORCE
+.PHONY: all check clean look lithic FORCE
 
 all: hyprdrive.so check
 
@@ -64,7 +64,24 @@ check: hyprdrive.so
 	bash scripts/gen_keys_table.sh --check
 	bash tests/host_tests.sh
 
+# The look bridge (look/): the desktop's Lithic style as text for the plugin,
+# which cannot link the Go library. Built from look/vendor, so no network.
+look:
+	cd look && GOFLAGS=-trimpath go build -o ../ryoku-hyprdrive-look .
+
+# Refresh look/vendor's copy of the Lithic library from a Ryoku checkout, by
+# default one beside this repository (../ryoku). go.mod and vendor/modules.txt
+# keep naming that place, so a build needs no checkout and no network.
+RYOKU ?= ../ryoku
+LITHIC_MOD = github.com/ryoku-dev/ryoku/docs/lithic/library/go
+LITHIC_REL = ../../ryoku/docs/lithic/library/go
+lithic:
+	@test -d "$(RYOKU)/docs/lithic/library/go" || { echo "no Lithic library under $(RYOKU); make lithic RYOKU=<a Ryoku checkout>"; exit 1; }
+	cd look && go mod edit -replace $(LITHIC_MOD)=$(abspath $(RYOKU))/docs/lithic/library/go && go mod vendor
+	cd look && go mod edit -replace $(LITHIC_MOD)=$(LITHIC_REL) \
+		&& sed -i 's|=> $(abspath $(RYOKU))/docs/lithic/library/go|=> $(LITHIC_REL)|' vendor/modules.txt
+
 clean:
-	rm -rf build hyprdrive.so
+	rm -rf build hyprdrive.so ryoku-hyprdrive-look
 
 -include $(DEPS)

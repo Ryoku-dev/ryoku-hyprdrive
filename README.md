@@ -6,9 +6,14 @@ Mosaic layouts and smooth window motion to Ryoku. It is a fork of
 Omarchy, with its dock, its folder stacks and its Omarchy integration taken
 out: Ryoku has its own dock, launcher and theme, and Hyprdrive now wears them.
 
+This repository is the plugin. [Ryoku](https://github.com/Ryoku-dev/ryoku)
+packages it as `ryoku-hyprdrive` from this repository's `ryoku` branch, and
+its Settings rebuild it from there when Hyprland moves; the Ryoku side (the
+switch, the settings page, the `user.lua` block) lives in Ryoku.
+
 It is off until you turn it on in Ryoku Settings > Windows > Hyprdrive
-(`ryoku-shell hub open hyprdrive`). The package is `ryoku-hyprdrive`; the
-plugin loads as `hyprdrive.so`.
+(`ryoku-shell hub open hyprdrive`), which warns first which shortcuts it takes.
+The plugin loads as `hyprdrive.so`.
 
 ## What it adds
 
@@ -29,19 +34,21 @@ plugin loads as `hyprdrive.so`.
 ## How it fits into Ryoku
 
 - **Off by default, one switch.** The switch is `plugins.hyprdrive.enabled` in
-  the window manager's store. Ryoku Settings writes it; the provider
-  (`ryoku/wm/hyprland/hyprdrive.go`) does the rest.
+  the window manager's store. Ryoku Settings writes it; Ryoku's Hyprland
+  provider (`ryoku/wm/hyprland/hyprdrive.go` in Ryoku) does the rest.
 - **It touches no Lua Ryoku ships.** Everything the plugin needs (the load,
   its settings, its binds, each desktop's layout) goes into one fenced block at
   the end of `~/.config/hypr/user.lua`, between `-- ryoku-hyprdrive:begin` and
   `-- ryoku-hyprdrive:end`. Ryoku rewrites only the block; your own lines
   above and below it stay as you wrote them. Turning Hyprdrive off removes the
   block.
-- **It asks before taking a shortcut.** Every shortcut it adds is listed on
-  its page with the Ryoku shortcut it would replace, checked against your own
-  rebinds. One that replaces a Ryoku shortcut stays off until you turn it on;
-  one that replaces nothing is on. `ryoku-wm-hyprland hyprdrive status` prints
-  the same list.
+- **It asks before taking a shortcut.** Turning it on lists every shortcut it
+  adds and every Ryoku one it replaces, checked against your own rebinds. On its
+  page each shortcut takes new keys the way Keyboard shortcuts does, and one
+  that would replace a Ryoku shortcut stays off until you turn it on.
+  `ryoku-wm-hyprland hyprdrive status` prints the same list. The canvas zoom is
+  held on any chord (`mosaic:zoom_key`, Super+Alt by default); keys are read
+  through the keymap, so a key `kb_options` turns into Super counts as Super.
 - **It wears the desktop's style.** The plugin draws in C++, where the Lithic
   library cannot be linked, so it runs `ryoku-hyprdrive-look --watch`
   ([look/](look/)), which reads your choice in Settings > Appearance > Style
@@ -61,6 +68,8 @@ plugin loads as `hyprdrive.so`.
 
 ```sh
 make            # hyprdrive.so, symcheck, the key table check and the host tests
+make look       # the look bridge, ryoku-hyprdrive-look, from look/vendor
+make lithic     # refresh look/vendor's Lithic from a Ryoku checkout (RYOKU=../ryoku)
 make clean
 ```
 
@@ -73,5 +82,5 @@ source.
 
 ## Licence
 
-BSD 3-Clause, as upstream ([LICENSE](LICENSE)). Ryoku's NOTICE carries the
-credit.
+BSD 3-Clause, as upstream ([LICENSE](LICENSE)): a fork of
+[Hyprdrive](https://github.com/dragosol/Hyprdrive) by dragos and contributors.
