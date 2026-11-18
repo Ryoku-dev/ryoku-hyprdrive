@@ -342,7 +342,7 @@ $out
 EOF
 )SH";
 
-        constexpr const char* USER_AGENT = "hyprdrive-ryoku (https://github.com/dodo986/hyprdrive-ryoku)";
+        constexpr const char* USER_AGENT = "hyprdrive-ryoku (https://github.com/Ryoku-dev/ryoku-hyprdrive)";
 
         SResult fetch(const SResolved& r) {
             SResult res;

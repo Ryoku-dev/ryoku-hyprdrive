@@ -1,4 +1,4 @@
-module github.com/dodo986/hyprdrive-ryoku/look
+module github.com/Ryoku-dev/ryoku-hyprdrive/look
 
 go 1.26
 
